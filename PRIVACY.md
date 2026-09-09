@@ -1,6 +1,6 @@
 # Privacy
 
-Codex Quota Local is designed to keep the default path local and inspectable.
+Codex Quota Local is designed to keep quota reads local-first and inspectable.
 
 ## Default mode
 
@@ -14,9 +14,23 @@ the app:
 
 - Reads `~/.codex/logs_2.sqlite` in read-only mode.
 - Parses Codex rate-limit headers already stored by Codex.
+- If local logs do not contain quota data, reads `~/.codex/auth.json` in memory.
+- If local logs do not contain quota data, sends an authenticated GET request to `https://chatgpt.com/backend-api/wham/usage`.
+- Does not create telemetry, analytics, history, or startup entries.
+
+## Offline-only mode
+
+When launched with:
+
+```powershell
+.\CodexQuotaLocal.exe --offline-only
+```
+
+the app:
+
+- Reads `~/.codex/logs_2.sqlite` in read-only mode.
 - Does not read `~/.codex/auth.json`.
 - Does not make network requests.
-- Does not create telemetry, analytics, history, or startup entries.
 
 ## Radar mode
 
@@ -40,7 +54,7 @@ Radar mode refreshes every 10 minutes by default. The interval can be changed wi
 .\CodexQuotaLocal.exe --radar --radar-interval-minutes 15
 ```
 
-## Live mode
+## Live-first mode
 
 When launched with:
 
@@ -54,7 +68,7 @@ the app reads `~/.codex/auth.json` in memory and sends an authenticated GET requ
 https://chatgpt.com/backend-api/wham/usage
 ```
 
-The access token and account id are used only for that request. They are not logged, displayed, copied into this project, or written to disk.
+The access token and account id are used only for that request. They are not logged, displayed, copied into this project, or written to disk. If the live request fails, the app falls back to local logs.
 
 ## Data retained
 

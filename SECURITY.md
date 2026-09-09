@@ -14,12 +14,12 @@ Open a private security advisory or share only redacted reproduction steps.
 
 ## Endpoint allowlist
 
-The source intentionally hardcodes and checks the only two network destinations used by optional modes:
+The source intentionally hardcodes and checks the only two network destinations used by quota fallback and optional modes:
 
 - `--radar`: `https://codex-reset.com/api/forecast`
-- `--live`: `https://chatgpt.com/backend-api/wham/usage`
+- default auto fallback / `--live`: `https://chatgpt.com/backend-api/wham/usage`
 
-Default mode uses neither endpoint.
+`--offline-only` uses neither endpoint.
 
 ## Release hygiene
 

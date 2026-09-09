@@ -12,8 +12,15 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Codex Quota Local")]
-[assembly: System.Reflection.AssemblyDescription("Small local Codex quota overlay. Offline by default.")]
-[assembly: System.Reflection.AssemblyVersion("0.2.0.0")]
+[assembly: System.Reflection.AssemblyDescription("Small local-first Codex quota overlay.")]
+[assembly: System.Reflection.AssemblyVersion("0.2.2.0")]
+
+internal enum QuotaReadMode
+{
+    Auto,
+    OfflineOnly,
+    LiveFirst
+}
 
 internal sealed class QuotaWindow
 {
@@ -76,9 +83,12 @@ internal static class QuotaReader
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr sqlite3_errmsg(IntPtr database);
 
-    public static QuotaSnapshot Read(bool live)
+    public static QuotaSnapshot Read(QuotaReadMode mode)
     {
-        if (live)
+        if (mode == QuotaReadMode.OfflineOnly)
+            return ReadLogs();
+
+        if (mode == QuotaReadMode.LiveFirst)
         {
             QuotaSnapshot remote = ReadRemote();
             if (remote != null) return remote;
@@ -88,7 +98,15 @@ internal static class QuotaReader
             return fallback;
         }
 
-        return ReadLogs();
+        QuotaSnapshot local = ReadLogs();
+        if (local != null) return local;
+
+        string offlineError = LastDiagnostic;
+        QuotaSnapshot liveFallback = ReadRemote();
+        LastDiagnostic = liveFallback == null
+            ? offlineError + "; live fallback failed: " + LastDiagnostic
+            : offlineError + "; using live fallback";
+        return liveFallback;
     }
 
     public static string ResolveCodexHome()
@@ -518,16 +536,22 @@ internal sealed class QuotaOverlayForm : Form
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpShowWindow = 0x0040;
 
-    private readonly bool liveMode;
-    private readonly bool radarMode;
-    private readonly int quotaIntervalSeconds;
-    private readonly int radarIntervalSeconds;
+    private QuotaReadMode quotaMode;
+    private bool radarMode;
+    private int quotaIntervalSeconds;
+    private int radarIntervalSeconds;
     private readonly Label label;
     private readonly NotifyIcon trayIcon;
     private readonly System.Windows.Forms.Timer timer;
     private readonly ToolStripMenuItem refreshItem;
     private readonly ToolStripMenuItem liveItem;
     private readonly ToolStripMenuItem radarItem;
+    private readonly ToolStripMenuItem quotaModeMenu;
+    private readonly ToolStripMenuItem quotaAutoItem;
+    private readonly ToolStripMenuItem quotaOfflineOnlyItem;
+    private readonly ToolStripMenuItem quotaLiveFirstItem;
+    private readonly ToolStripMenuItem quotaRefreshMenu;
+    private readonly ToolStripMenuItem radarRefreshMenu;
     private IntPtr trackedWindow = IntPtr.Zero;
     private IntPtr ownedWindow = IntPtr.Zero;
     private bool allowVisible;
@@ -549,9 +573,9 @@ internal sealed class QuotaOverlayForm : Form
     [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)] private static extern IntPtr SetWindowLongPtr32(IntPtr hwnd, int index, IntPtr value);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect rect, int size);
 
-    public QuotaOverlayForm(bool live, bool radar, int quotaInterval, int radarInterval)
+    public QuotaOverlayForm(QuotaReadMode mode, bool radar, int quotaInterval, int radarInterval)
     {
-        liveMode = live;
+        quotaMode = mode;
         radarMode = radar;
         quotaIntervalSeconds = Math.Max(2, quotaInterval);
         radarIntervalSeconds = Math.Max(30, radarInterval);
@@ -569,27 +593,51 @@ internal sealed class QuotaOverlayForm : Form
         label.ForeColor = Color.FromArgb(238, 238, 242);
         label.Font = new Font("Segoe UI", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
         label.AutoEllipsis = true;
-        label.Text = liveMode ? "Quota: live sync..." : "Quota: local logs...";
+        label.Text = InitialQuotaText(quotaMode);
         Controls.Add(label);
 
         ContextMenuStrip menu = new ContextMenuStrip();
         refreshItem = new ToolStripMenuItem("Refresh now");
         refreshItem.Click += delegate { RefreshData(true); };
-        liveItem = new ToolStripMenuItem("Live mode requires --live");
+        liveItem = new ToolStripMenuItem("Quota source: waiting");
         liveItem.Enabled = false;
-        radarItem = new ToolStripMenuItem("Reset radar requires --radar");
-        radarItem.Enabled = false;
+        quotaModeMenu = new ToolStripMenuItem("Quota mode");
+        quotaAutoItem = new ToolStripMenuItem("Auto: logs, then live");
+        quotaAutoItem.Click += delegate { SetQuotaMode(QuotaReadMode.Auto); };
+        quotaOfflineOnlyItem = new ToolStripMenuItem("Offline only");
+        quotaOfflineOnlyItem.Click += delegate { SetQuotaMode(QuotaReadMode.OfflineOnly); };
+        quotaLiveFirstItem = new ToolStripMenuItem("Live first");
+        quotaLiveFirstItem.Click += delegate { SetQuotaMode(QuotaReadMode.LiveFirst); };
+        quotaModeMenu.DropDownItems.Add(quotaAutoItem);
+        quotaModeMenu.DropDownItems.Add(quotaOfflineOnlyItem);
+        quotaModeMenu.DropDownItems.Add(quotaLiveFirstItem);
+        radarItem = new ToolStripMenuItem("Reset radar: off");
+        radarItem.Click += delegate { SetRadarMode(!radarMode); };
+        quotaRefreshMenu = new ToolStripMenuItem("Quota refresh");
+        AddIntervalItem(quotaRefreshMenu, "5 seconds", 5, true);
+        AddIntervalItem(quotaRefreshMenu, "10 seconds", 10, true);
+        AddIntervalItem(quotaRefreshMenu, "30 seconds", 30, true);
+        AddIntervalItem(quotaRefreshMenu, "1 minute", 60, true);
+        radarRefreshMenu = new ToolStripMenuItem("Radar refresh");
+        AddIntervalItem(radarRefreshMenu, "1 minute", 60, false);
+        AddIntervalItem(radarRefreshMenu, "5 minutes", 300, false);
+        AddIntervalItem(radarRefreshMenu, "10 minutes", 600, false);
+        AddIntervalItem(radarRefreshMenu, "30 minutes", 1800, false);
         ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += delegate { Close(); };
         menu.Items.Add(refreshItem);
         menu.Items.Add(liveItem);
+        menu.Items.Add(quotaModeMenu);
         menu.Items.Add(radarItem);
+        menu.Items.Add(quotaRefreshMenu);
+        menu.Items.Add(radarRefreshMenu);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
+        UpdateMenuState(null, null);
 
         trayIcon = new NotifyIcon();
         trayIcon.Icon = SystemIcons.Information;
-        trayIcon.Text = liveMode ? "Codex Quota Local (live)" : "Codex Quota Local (offline)";
+        trayIcon.Text = "Codex Quota Local (" + QuotaModeText(quotaMode) + ")";
         trayIcon.ContextMenuStrip = menu;
         trayIcon.Visible = true;
 
@@ -643,7 +691,9 @@ internal sealed class QuotaOverlayForm : Form
         bool readRadar = radarMode && (force || radarCountdown <= 0);
         ThreadPool.QueueUserWorkItem(delegate
         {
-            QuotaSnapshot snapshot = readQuota ? QuotaReader.Read(liveMode) : latest;
+            QuotaReadMode readMode = quotaMode;
+            bool readRadarEnabled = radarMode;
+            QuotaSnapshot snapshot = readQuota ? QuotaReader.Read(readMode) : latest;
             RadarSnapshot radar = readRadar ? RadarReader.Read() : latestRadar;
             try
             {
@@ -651,14 +701,14 @@ internal sealed class QuotaOverlayForm : Form
                 {
                     BeginInvoke((MethodInvoker)delegate
                     {
+                        if (!radarMode) radar = null;
                         latest = snapshot;
                         latestRadar = radar;
                         label.Text = FormatSnapshot(snapshot, radar);
                         trayIcon.Text = ShortTrayText(label.Text);
-                        liveItem.Text = liveMode ? "Quota source: OpenAI live API" : "Quota source: local Codex logs";
-                        radarItem.Text = radarMode ? FormatRadarMenuText(radar) : "Reset radar: off";
+                        UpdateMenuState(snapshot, radar);
                         if (readQuota) quotaCountdown = snapshot == null ? 3 : quotaIntervalSeconds;
-                        if (readRadar) radarCountdown = radar == null ? 60 : radarIntervalSeconds;
+                        if (readRadar && readRadarEnabled) radarCountdown = radar == null ? 60 : radarIntervalSeconds;
                         Interlocked.Exchange(ref refreshInProgress, 0);
                     });
                 }
@@ -671,10 +721,107 @@ internal sealed class QuotaOverlayForm : Form
         });
     }
 
+    private void SetQuotaMode(QuotaReadMode mode)
+    {
+        if (quotaMode == mode) return;
+        quotaMode = mode;
+        quotaCountdown = 0;
+        latest = null;
+        label.Text = InitialQuotaText(quotaMode);
+        trayIcon.Text = ShortTrayText(label.Text);
+        UpdateMenuState(null, latestRadar);
+        RefreshData(true);
+    }
+
+    private void SetRadarMode(bool enabled)
+    {
+        if (radarMode == enabled) return;
+        radarMode = enabled;
+        radarCountdown = 0;
+        if (!radarMode) latestRadar = null;
+        label.Text = FormatSnapshot(latest, latestRadar);
+        trayIcon.Text = ShortTrayText(label.Text);
+        UpdateMenuState(latest, latestRadar);
+        if (radarMode) RefreshData(true);
+    }
+
+    private void SetQuotaInterval(int seconds)
+    {
+        quotaIntervalSeconds = Math.Max(2, seconds);
+        quotaCountdown = 0;
+        UpdateMenuState(latest, latestRadar);
+        RefreshData(false);
+    }
+
+    private void SetRadarInterval(int seconds)
+    {
+        radarIntervalSeconds = Math.Max(30, seconds);
+        radarCountdown = 0;
+        UpdateMenuState(latest, latestRadar);
+        if (radarMode) RefreshData(false);
+    }
+
+    private void AddIntervalItem(ToolStripMenuItem menu, string text, int seconds, bool quota)
+    {
+        ToolStripMenuItem item = new ToolStripMenuItem(text);
+        item.Tag = seconds;
+        item.Click += delegate
+        {
+            if (quota) SetQuotaInterval(seconds);
+            else SetRadarInterval(seconds);
+        };
+        menu.DropDownItems.Add(item);
+    }
+
+    private void UpdateMenuState(QuotaSnapshot snapshot, RadarSnapshot radar)
+    {
+        liveItem.Text = FormatQuotaMenuText(snapshot, quotaMode);
+        quotaAutoItem.Checked = quotaMode == QuotaReadMode.Auto;
+        quotaOfflineOnlyItem.Checked = quotaMode == QuotaReadMode.OfflineOnly;
+        quotaLiveFirstItem.Checked = quotaMode == QuotaReadMode.LiveFirst;
+        radarItem.Checked = radarMode;
+        radarItem.Text = radarMode ? FormatRadarMenuText(radar) : "Reset radar: off";
+        SetIntervalChecks(quotaRefreshMenu, quotaIntervalSeconds);
+        SetIntervalChecks(radarRefreshMenu, radarIntervalSeconds);
+    }
+
+    private static void SetIntervalChecks(ToolStripMenuItem menu, int seconds)
+    {
+        foreach (ToolStripItem child in menu.DropDownItems)
+        {
+            ToolStripMenuItem item = child as ToolStripMenuItem;
+            if (item == null || item.Tag == null) continue;
+            item.Checked = Convert.ToInt32(item.Tag, System.Globalization.CultureInfo.InvariantCulture) == seconds;
+        }
+    }
+
     private static string ShortTrayText(string text)
     {
         if (String.IsNullOrEmpty(text)) return "Codex Quota Local";
         return text.Length <= 63 ? text : text.Substring(0, 63);
+    }
+
+    private static string InitialQuotaText(QuotaReadMode mode)
+    {
+        if (mode == QuotaReadMode.OfflineOnly) return "Quota: local logs...";
+        if (mode == QuotaReadMode.LiveFirst) return "Quota: live sync...";
+        return "Quota: local logs, then live...";
+    }
+
+    private static string QuotaModeText(QuotaReadMode mode)
+    {
+        if (mode == QuotaReadMode.OfflineOnly) return "offline only";
+        if (mode == QuotaReadMode.LiveFirst) return "live first";
+        return "auto";
+    }
+
+    private static string FormatQuotaMenuText(QuotaSnapshot snapshot, QuotaReadMode mode)
+    {
+        if (snapshot != null && snapshot.Source != null)
+            return "Quota source: " + snapshot.Source;
+        if (mode == QuotaReadMode.Auto)
+            return "Quota mode: auto (logs, then live fallback)";
+        return "Quota mode: " + QuotaModeText(mode);
     }
 
     private static string FormatRadarMenuText(RadarSnapshot radar)
@@ -827,14 +974,16 @@ internal static class Program
     private static void Main(string[] args)
     {
         bool live = HasArg(args, "--live");
+        bool offlineOnly = HasArg(args, "--offline-only");
         bool radar = HasArg(args, "--radar");
         bool snapshot = HasArg(args, "--snapshot");
         int quotaInterval = IntArg(args, "--quota-interval-seconds", 10);
         int radarInterval = IntArg(args, "--radar-interval-minutes", 10) * 60;
+        QuotaReadMode quotaMode = offlineOnly ? QuotaReadMode.OfflineOnly : (live ? QuotaReadMode.LiveFirst : QuotaReadMode.Auto);
 
         if (snapshot)
         {
-            QuotaSnapshot data = QuotaReader.Read(live);
+            QuotaSnapshot data = QuotaReader.Read(quotaMode);
             if (data == null)
             {
                 Console.WriteLine("NO_DATA: " + QuotaReader.LastDiagnostic);
@@ -850,6 +999,7 @@ internal static class Program
                     window.ResetAtUnix > 0 ? UnixTime.ToLocal(window.ResetAtUnix).ToString("yyyy-MM-dd HH:mm:ss") : "unknown");
             }
             Console.WriteLine("source: " + data.Source);
+            Console.WriteLine("diagnostic: " + QuotaReader.LastDiagnostic);
             if (radar)
             {
                 RadarSnapshot radarData = RadarReader.Read();
@@ -871,13 +1021,13 @@ internal static class Program
         }
 
         bool ownsMutex;
-        using (Mutex mutex = new Mutex(true, "Local\\CodexQuotaLocal" + (live ? "Live" : "Offline") + (radar ? "Radar" : ""), out ownsMutex))
+        using (Mutex mutex = new Mutex(true, "Local\\CodexQuotaLocal" + quotaMode.ToString() + (radar ? "Radar" : ""), out ownsMutex))
         {
             if (!ownsMutex) return;
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new QuotaOverlayForm(live, radar, quotaInterval, radarInterval));
+            Application.Run(new QuotaOverlayForm(quotaMode, radar, quotaInterval, radarInterval));
         }
     }
 
