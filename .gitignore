@@ -1,0 +1,14 @@
+bin/
+obj/
+dist/
+*.pdb
+*.exe
+*.user
+*.suo
+*.log
+*.tmp
+*.bak
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.vs/
