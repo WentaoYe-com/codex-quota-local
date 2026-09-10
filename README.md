@@ -16,6 +16,7 @@
 - 支持严格离线模式 `--offline-only`，只读本地日志，不读取 `auth.json`，不联网。
 - 托盘右键可直接切换 quota mode、开关 reset radar、修改 quota/radar 刷新频率。
 - 默认额度每 10 秒刷新一次，radar 每 10 分钟刷新一次。
+- 可选 `--follow-codex` watcher：Codex/ChatGPT 桌面端打开时启动悬浮窗，关闭时退出悬浮窗。
 
 示例显示：
 
@@ -39,6 +40,28 @@
 - `Radar refresh`：切换 1 分钟、5 分钟、10 分钟、30 分钟。
 
 切换 quota mode、打开 radar、修改刷新频率后，程序会立即触发一次刷新。
+
+## 跟随 Codex 开关
+
+如果希望悬浮窗跟随 Codex/ChatGPT 桌面端打开和关闭，可以运行：
+
+```powershell
+.\CodexQuotaLocal.exe --follow-codex --radar
+```
+
+或者双击：
+
+```text
+Run-Follow-Codex.cmd
+```
+
+说明：
+
+- `--follow-codex` 会启动一个轻量 watcher。ChatGPT/Codex 桌面进程存在时，它启动悬浮窗；桌面进程关闭后，它关闭悬浮窗。
+- watcher 本身需要保持运行，才能感知下一次 Codex 打开。
+- watcher 会显示一个系统托盘图标，右键 `Exit follower` 可以退出 watcher，并关闭它启动的悬浮窗。
+- 这个模式不写开机启动项、不创建服务、不写注册表。如果希望开机自动跟随，可以自行把 `Run-Follow-Codex.cmd` 放进 Windows 启动文件夹。
+- 如果只想让当前悬浮窗在 Codex 关闭后自动退出，可以运行 `.\CodexQuotaLocal.exe --radar --exit-with-codex`。
 
 ## 和现有项目的差异
 
@@ -111,7 +134,7 @@ Live-first 运行：
 
 ## 下载后直接使用
 
-从 GitHub Release 下载 `CodexQuotaLocal-v0.3.0-win-x64-portable.zip`，解压后运行：
+从 GitHub Release 下载 `CodexQuotaLocal-v0.3.1-win-x64-portable.zip`，解压后运行：
 
 ```powershell
 .\CodexQuotaLocal.exe
@@ -127,6 +150,12 @@ Run-Offline.cmd
 
 ```text
 Run-With-Radar.cmd
+```
+
+如果希望悬浮窗跟随 Codex/ChatGPT 桌面端打开和关闭，可以双击：
+
+```text
+Run-Follow-Codex.cmd
 ```
 
 如果希望显示 reset radar，并保留默认 auto quota 读取：
@@ -168,7 +197,8 @@ Run-With-Radar.cmd
 - `CodexQuotaLocalCli.exe`：命令行快照版本。
 - `Run-Offline.cmd` / `Snapshot-Offline.cmd`：严格离线双击脚本。
 - `Run-With-Radar.cmd` / `Snapshot-With-Radar.cmd`：auto quota + radar 双击脚本。
-- `dist/CodexQuotaLocal-v0.3.0-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
+- `Run-Follow-Codex.cmd`：auto quota + radar + 跟随 Codex/ChatGPT 打开关闭的 watcher 脚本。
+- `dist/CodexQuotaLocal-v0.3.1-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
 
 ## 环境变量
 

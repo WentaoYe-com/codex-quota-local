@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$version = '0.3.0'
+$version = '0.3.1'
 $compiler = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw 'The built-in Windows C# compiler was not found.'
@@ -52,10 +52,11 @@ Copy-Item -LiteralPath (Join-Path $projectDir 'README.md') -Destination $stageDi
 Copy-Item -LiteralPath (Join-Path $projectDir 'PRIVACY.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'SECURITY.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'CHANGELOG.md') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'RELEASE_NOTES_v0.3.0.md') -Destination $stageDir
+Copy-Item -LiteralPath (Join-Path $projectDir 'RELEASE_NOTES_v0.3.1.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'LICENSE') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Offline.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-With-Radar.cmd') -Destination $stageDir
+Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Follow-Codex.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-Offline.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-With-Radar.cmd') -Destination $stageDir
 

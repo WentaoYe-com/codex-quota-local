@@ -23,6 +23,8 @@ The source intentionally hardcodes and checks the network destinations used by q
 
 `--offline-only` uses no network endpoint.
 
+`--follow-codex` adds only local process checks for `ChatGPT` and `Codex`. It does not add a network endpoint.
+
 ## Release hygiene
 
 Before publishing a release, run:

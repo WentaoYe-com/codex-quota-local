@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- Added optional `--follow-codex` watcher mode to start the overlay when ChatGPT/Codex is running and close it when the host exits.
+- Added `--exit-with-codex` for one overlay instance that exits automatically after ChatGPT/Codex closes.
+- Added `Run-Follow-Codex.cmd` for double-click use.
+- Added a system tray exit command for the watcher.
+- Kept follow mode non-persistent: no startup entry, service, registry write, or telemetry.
+
 ## 0.3.0
 
 - Changed reset radar to show multiple 24-hour readings in one compact line: `Radar 24h oracle/signal/watch`.
