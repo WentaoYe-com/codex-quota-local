@@ -40,10 +40,12 @@ When launched with:
 .\CodexQuotaLocal.exe --radar
 ```
 
-the app additionally sends an unauthenticated GET request to:
+the app additionally sends unauthenticated GET requests to:
 
 ```text
 https://codex-reset.com/api/forecast
+https://codexreset.app/api/signal
+https://savemetibo.com/status.json
 ```
 
 This request does not include Codex credentials, account ids, local quota logs, file paths, or user content.

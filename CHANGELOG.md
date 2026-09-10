@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Changed reset radar to show multiple 24-hour readings in one compact line: `Radar 24h oracle/signal/watch`.
+- Removed the 48-hour radar value from the overlay.
+- Added `codexreset.app` and `savemetibo.com` as optional public radar sources.
+- Kept partial radar results visible when one public source is unavailable.
+- Added per-source radar values, update times, and URLs to CLI snapshot output.
+
 ## 0.2.2
 
 - Added tray menu controls for quota mode, reset radar, quota refresh interval, and radar refresh interval.

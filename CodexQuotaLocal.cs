@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Codex Quota Local")]
 [assembly: System.Reflection.AssemblyDescription("Small local-first Codex quota overlay.")]
-[assembly: System.Reflection.AssemblyVersion("0.2.2.0")]
+[assembly: System.Reflection.AssemblyVersion("0.3.0.0")]
 
 internal enum QuotaReadMode
 {
@@ -38,13 +38,21 @@ internal sealed class QuotaSnapshot
 
 internal sealed class RadarSnapshot
 {
-    public int Probability24h;
-    public int Probability48h;
+    public readonly List<RadarReading> Readings = new List<RadarReading>();
     public string Confidence;
     public string UpdatedAt;
     public string LastResetAt;
     public string LatestSummary;
     public string LatestUrl;
+}
+
+internal sealed class RadarReading
+{
+    public string Name;
+    public int Probability24h;
+    public string Detail;
+    public string UpdatedAt;
+    public string Url;
 }
 
 internal static class UnixTime
@@ -214,7 +222,7 @@ internal static class QuotaReader
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(endpoint);
             request.Method = "GET";
             request.Accept = "application/json";
-            request.UserAgent = "codex-quota-local/0.2";
+            request.UserAgent = "codex-quota-local/0.3";
             request.Timeout = 8000;
             request.ReadWriteTimeout = 8000;
             request.Headers[HttpRequestHeader.Authorization] = "Bearer " + accessToken;
@@ -428,72 +436,165 @@ internal static class QuotaReader
 internal static class RadarReader
 {
     public static string LastDiagnostic = "not started";
-    private static readonly Uri ForecastEndpoint = new Uri("https://codex-reset.com/api/forecast");
+    private static readonly Uri OracleEndpoint = new Uri("https://codex-reset.com/api/forecast");
+    private static readonly Uri SignalEndpoint = new Uri("https://codexreset.app/api/signal");
+    private static readonly Uri WatchEndpoint = new Uri("https://savemetibo.com/status.json");
 
     public static RadarSnapshot Read()
     {
+        RadarSnapshot snapshot = new RadarSnapshot();
+        List<string> diagnostics = new List<string>();
+
+        AddOracleReading(snapshot, diagnostics);
+        AddSignalReading(snapshot, diagnostics);
+        AddWatchReading(snapshot, diagnostics);
+
+        if (snapshot.Readings.Count == 0)
+        {
+            LastDiagnostic = "radar unavailable: " + String.Join("; ", diagnostics.ToArray());
+            return null;
+        }
+
+        LastDiagnostic = "radar ok: " + FormatDiagnostic(snapshot);
+        if (diagnostics.Count > 0)
+            LastDiagnostic += "; unavailable: " + String.Join("; ", diagnostics.ToArray());
+        return snapshot;
+    }
+
+    private static void AddOracleReading(RadarSnapshot snapshot, List<string> diagnostics)
+    {
         try
         {
-            if (!ForecastEndpoint.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ||
-                !ForecastEndpoint.Host.Equals("codex-reset.com", StringComparison.OrdinalIgnoreCase))
-            {
-                LastDiagnostic = "blocked radar request: endpoint allowlist failed";
-                return null;
-            }
-
-            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(ForecastEndpoint);
-            request.Method = "GET";
-            request.Accept = "application/json";
-            request.UserAgent = "codex-quota-local/0.2";
-            request.Timeout = 8000;
-            request.ReadWriteTimeout = 8000;
-
-            string json;
-            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-            using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
-            {
-                if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    LastDiagnostic = "radar HTTP " + (int)response.StatusCode;
-                    return null;
-                }
-                json = reader.ReadToEnd();
-            }
-
-            JavaScriptSerializer serializer = new JavaScriptSerializer();
-            Dictionary<string, object> root = serializer.DeserializeObject(json) as Dictionary<string, object>;
+            Dictionary<string, object> root = FetchJson(OracleEndpoint);
             Dictionary<string, object> probabilities = Dict(root, "probabilities");
             Dictionary<string, object> latestAlert = Dict(root, "latest_alert");
+            int value = IntValue(probabilities, "rounded_24h", -1);
+            if (value < 0) { diagnostics.Add("oracle missing 24h"); return; }
 
-            RadarSnapshot snapshot = new RadarSnapshot();
-            snapshot.Probability24h = IntValue(probabilities, "rounded_24h", -1);
-            snapshot.Probability48h = IntValue(probabilities, "rounded_48h", -1);
+            snapshot.Readings.Add(new RadarReading
+            {
+                Name = "oracle",
+                Probability24h = value,
+                Detail = Str(root, "confidence_note"),
+                UpdatedAt = Str(root, "updated_at"),
+                Url = "https://codex-reset.com/api/forecast"
+            });
             snapshot.Confidence = Str(root, "confidence");
             snapshot.UpdatedAt = Str(root, "updated_at");
             snapshot.LastResetAt = Str(root, "last_reset_at");
             snapshot.LatestSummary = Str(latestAlert, "summary");
             snapshot.LatestUrl = Str(latestAlert, "url");
-            if (snapshot.Probability24h < 0 && snapshot.Probability48h < 0)
-            {
-                LastDiagnostic = "radar response missing probabilities";
-                return null;
-            }
-
-            LastDiagnostic = "radar ok";
-            return snapshot;
-        }
-        catch (WebException exception)
-        {
-            HttpWebResponse response = exception.Response as HttpWebResponse;
-            LastDiagnostic = response == null ? "radar request failed: " + exception.Status : "radar HTTP " + (int)response.StatusCode;
-            return null;
         }
         catch (Exception exception)
         {
-            LastDiagnostic = "radar failed: " + exception.GetType().Name;
-            return null;
+            diagnostics.Add("oracle " + ErrorText(exception));
         }
+    }
+
+    private static void AddSignalReading(RadarSnapshot snapshot, List<string> diagnostics)
+    {
+        try
+        {
+            Dictionary<string, object> root = FetchJson(SignalEndpoint);
+            Dictionary<string, object> forecast = Dict(root, "forecast");
+            int value = IntValue(forecast, "probability24h", -1);
+            if (value < 0) { diagnostics.Add("signal missing 24h"); return; }
+
+            snapshot.Readings.Add(new RadarReading
+            {
+                Name = "signal",
+                Probability24h = value,
+                Detail = Str(forecast, "narrative"),
+                UpdatedAt = Str(root, "dataAsOf"),
+                Url = "https://codexreset.app/api/signal"
+            });
+        }
+        catch (Exception exception)
+        {
+            diagnostics.Add("signal " + ErrorText(exception));
+        }
+    }
+
+    private static void AddWatchReading(RadarSnapshot snapshot, List<string> diagnostics)
+    {
+        try
+        {
+            Dictionary<string, object> root = FetchJson(WatchEndpoint);
+            object[] changes = ArrayValue(root, "change_log");
+            if (changes == null || changes.Length == 0) { diagnostics.Add("watch missing change_log"); return; }
+            Dictionary<string, object> latest = changes[0] as Dictionary<string, object>;
+            int value = IntValue(latest, "value", -1);
+            if (value < 0) { diagnostics.Add("watch missing value"); return; }
+
+            snapshot.Readings.Add(new RadarReading
+            {
+                Name = "watch",
+                Probability24h = value,
+                Detail = Str(latest, "text"),
+                UpdatedAt = Str(latest, "at"),
+                Url = "https://savemetibo.com/status.json"
+            });
+        }
+        catch (Exception exception)
+        {
+            diagnostics.Add("watch " + ErrorText(exception));
+        }
+    }
+
+    private static Dictionary<string, object> FetchJson(Uri endpoint)
+    {
+        if (!IsAllowedEndpoint(endpoint))
+            throw new InvalidOperationException("endpoint allowlist failed");
+
+        ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(endpoint);
+        request.Method = "GET";
+        request.Accept = "application/json";
+        request.UserAgent = "codex-quota-local/0.3";
+        request.Timeout = 8000;
+        request.ReadWriteTimeout = 8000;
+
+        string json;
+        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+        using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+        {
+            if (response.StatusCode != HttpStatusCode.OK)
+                throw new WebException("HTTP " + (int)response.StatusCode);
+            json = reader.ReadToEnd();
+        }
+
+        JavaScriptSerializer serializer = new JavaScriptSerializer();
+        Dictionary<string, object> root = serializer.DeserializeObject(json) as Dictionary<string, object>;
+        if (root == null) throw new InvalidDataException("JSON root was not an object");
+        return root;
+    }
+
+    private static bool IsAllowedEndpoint(Uri endpoint)
+    {
+        if (!endpoint.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)) return false;
+        string host = endpoint.Host.ToLowerInvariant();
+        return host.Equals("codex-reset.com") ||
+            host.Equals("codexreset.app") ||
+            host.Equals("savemetibo.com");
+    }
+
+    private static string ErrorText(Exception exception)
+    {
+        WebException web = exception as WebException;
+        if (web != null)
+        {
+            HttpWebResponse response = web.Response as HttpWebResponse;
+            return response == null ? web.Status.ToString() : "HTTP " + (int)response.StatusCode;
+        }
+        return exception.GetType().Name;
+    }
+
+    private static string FormatDiagnostic(RadarSnapshot snapshot)
+    {
+        List<string> parts = new List<string>();
+        foreach (RadarReading reading in snapshot.Readings)
+            parts.Add(reading.Name + "=" + reading.Probability24h.ToString() + "%");
+        return String.Join(", ", parts.ToArray());
     }
 
     private static object Raw(Dictionary<string, object> source, string key)
@@ -507,6 +608,11 @@ internal static class RadarReader
         return Raw(source, key) as Dictionary<string, object>;
     }
 
+    private static object[] ArrayValue(Dictionary<string, object> source, string key)
+    {
+        return Raw(source, key) as object[];
+    }
+
     private static string Str(Dictionary<string, object> source, string key)
     {
         object value = Raw(source, key);
@@ -518,7 +624,7 @@ internal static class RadarReader
         try
         {
             object value = Raw(source, key);
-            return value == null ? fallback : Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
+            return value == null ? fallback : Math.Max(0, Math.Min(100, Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)));
         }
         catch { return fallback; }
     }
@@ -827,8 +933,7 @@ internal sealed class QuotaOverlayForm : Form
     private static string FormatRadarMenuText(RadarSnapshot radar)
     {
         if (radar == null) return "Reset radar: waiting";
-        string confidence = String.IsNullOrWhiteSpace(radar.Confidence) ? "" : ", " + radar.Confidence;
-        return "Reset radar: 24h " + radar.Probability24h + "%, 48h " + radar.Probability48h + "%" + confidence;
+        return "Reset radar 24h: " + FormatRadarValues(radar) + " (oracle/signal/watch)";
     }
 
     private static string FormatSnapshot(QuotaSnapshot snapshot, RadarSnapshot radar)
@@ -839,12 +944,30 @@ internal sealed class QuotaOverlayForm : Form
 
         if (radar != null)
         {
-            string radarText = "Radar 24h " + radar.Probability24h + "%";
-            if (radar.Probability48h >= 0) radarText += " / 48h " + radar.Probability48h + "%";
-            output.Add(radarText);
+            output.Add("Radar 24h " + FormatRadarValues(radar));
         }
 
         return String.Join("  |  ", output.ToArray());
+    }
+
+    private static string FormatRadarValues(RadarSnapshot radar)
+    {
+        string[] names = new string[] { "oracle", "signal", "watch" };
+        List<string> values = new List<string>();
+        foreach (string name in names)
+        {
+            RadarReading reading = FindRadarReading(radar, name);
+            values.Add(reading == null ? "--" : reading.Probability24h.ToString() + "%");
+        }
+        return String.Join("/", values.ToArray());
+    }
+
+    private static RadarReading FindRadarReading(RadarSnapshot radar, string name)
+    {
+        if (radar == null) return null;
+        foreach (RadarReading reading in radar.Readings)
+            if (reading.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return reading;
+        return null;
     }
 
     private static string FormatQuota(QuotaSnapshot snapshot)
@@ -1009,12 +1132,17 @@ internal static class Program
                 }
                 else
                 {
-                    Console.WriteLine("radar_24h: {0}%", radarData.Probability24h);
-                    Console.WriteLine("radar_48h: {0}%", radarData.Probability48h);
+                    foreach (RadarReading reading in radarData.Readings)
+                    {
+                        Console.WriteLine("radar_24h_{0}: {1}%", reading.Name, reading.Probability24h);
+                        Console.WriteLine("radar_updated_at_{0}: {1}", reading.Name, reading.UpdatedAt);
+                        Console.WriteLine("radar_url_{0}: {1}", reading.Name, reading.Url);
+                    }
                     Console.WriteLine("radar_confidence: {0}", radarData.Confidence);
                     Console.WriteLine("radar_updated_at: {0}", radarData.UpdatedAt);
                     Console.WriteLine("radar_last_reset_at: {0}", radarData.LastResetAt);
                     Console.WriteLine("radar_latest_url: {0}", radarData.LatestUrl);
+                    Console.WriteLine("radar_diagnostic: " + RadarReader.LastDiagnostic);
                 }
             }
             return;

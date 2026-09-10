@@ -8,7 +8,7 @@
 
 - 显示 Codex 5 小时额度窗口剩余百分比和自然重置时间。
 - 显示 Codex weekly 额度窗口剩余百分比和自然重置时间。
-- 可选显示 reset radar：未来 24/48 小时出现额外 reset-like 事件的公开预测概率。
+- 可选显示多来源 reset radar：未来 24 小时出现额外 reset-like 事件的多个公开预测/信号值。
 - 悬浮窗跟随 ChatGPT/Codex 桌面窗口。
 - 系统托盘菜单提供手动刷新和退出。
 - 附带 CLI 快照模式，方便排查和自动化。
@@ -20,14 +20,14 @@
 示例显示：
 
 ```text
-5h 56% -> 15:57 | W 88% -> 9/15 12:22 | Radar 24h 25% / 48h 45%
+5h 56% -> 15:57 | W 88% -> 9/15 12:22 | Radar 24h 25%/67%/86%
 ```
 
 其中：
 
 - `5h 56% -> 15:57` 表示 5 小时窗口剩余 56%，今天 15:57 自然重置。
 - `W 88% -> 9/15 12:22` 表示 weekly 窗口剩余 88%，9 月 15 日 12:22 自然重置。
-- `Radar 24h 25% / 48h 45%` 表示 public reset radar 预测未来 24/48 小时内出现额外 reset-like 事件的概率。它不是你个人额度窗口的自然重置时间。
+- `Radar 24h 25%/67%/86%` 表示多个公开 reset radar 来源对未来 24 小时的预测/信号读数，顺序是 `oracle / signal / watch`。如果某个来源暂时不可用，对应位置会显示 `--`。这些数值口径不同，适合并列参考，不适合取平均。它不是你个人额度窗口的自然重置时间。
 
 ## 托盘菜单
 
@@ -53,7 +53,7 @@ Codex Quota Local 的取舍：
 
 - 默认 auto：先只读 `~/.codex/logs_2.sqlite`；如果本地日志没有可解析 quota，再读取 `auth.json` 并请求 OpenAI usage endpoint。
 - 严格离线：`--offline-only` 只读本地日志，不读 `auth.json`，不联网。
-- Radar 独立开关：只有 `--radar` 才访问 `https://codex-reset.com/api/forecast`，且不发送任何 Codex token。
+- Radar 独立开关：只有 `--radar` 才访问公开 radar endpoints，且不发送任何 Codex token。
 - Live-first 独立开关：`--live` 会优先读取 usage endpoint，再回退到本地日志。
 - 无依赖：Windows 自带 .NET Framework 编译器即可构建，不使用 npm、pip、Electron 或第三方 SDK。
 - 无持久化：不保存凭据、不保存历史、不写启动项、不写注册表。
@@ -93,7 +93,7 @@ Radar 运行：
 
 额外行为：
 
-- 请求 `https://codex-reset.com/api/forecast`。
+- 请求 `https://codex-reset.com/api/forecast`、`https://codexreset.app/api/signal` 和 `https://savemetibo.com/status.json`。
 - 请求不带 Authorization header，不带 Codex account id，不带本地日志内容。
 
 Live-first 运行：
@@ -111,7 +111,7 @@ Live-first 运行：
 
 ## 下载后直接使用
 
-从 GitHub Release 下载 `CodexQuotaLocal-v0.2.2-win-x64-portable.zip`，解压后运行：
+从 GitHub Release 下载 `CodexQuotaLocal-v0.3.0-win-x64-portable.zip`，解压后运行：
 
 ```powershell
 .\CodexQuotaLocal.exe
@@ -168,7 +168,7 @@ Run-With-Radar.cmd
 - `CodexQuotaLocalCli.exe`：命令行快照版本。
 - `Run-Offline.cmd` / `Snapshot-Offline.cmd`：严格离线双击脚本。
 - `Run-With-Radar.cmd` / `Snapshot-With-Radar.cmd`：auto quota + radar 双击脚本。
-- `dist/CodexQuotaLocal-v0.2.2-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
+- `dist/CodexQuotaLocal-v0.3.0-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
 
 ## 环境变量
 
