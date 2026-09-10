@@ -17,6 +17,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test quota freshness
+        shell: pwsh
+        run: .\test.ps1
+
       - name: Build portable package
         shell: pwsh
         run: .\build.ps1

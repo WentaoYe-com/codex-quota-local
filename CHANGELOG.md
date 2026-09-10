@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2
+
+- Fixed auto mode repeatedly displaying expired local quota instead of querying live usage.
+- Validate the log timestamp (60-second freshness limit) and all window reset times; stale data is unavailable in offline-only mode.
+- Anchor relative reset times to the log timestamp, not the current polling time.
+- Expire visible snapshots while waiting for refresh and discard results from a previous quota mode.
+- Disable usage HTTP caching and redirects; use the configured interval on failed refreshes too.
+- Add CLI observation timestamps and 18 synthetic regression tests.
+
 ## 0.3.1
 
 - Added optional `--follow-codex` watcher mode to start the overlay when ChatGPT/Codex is running and close it when the host exits.

@@ -14,8 +14,8 @@ the app:
 
 - Reads `~/.codex/logs_2.sqlite` in read-only mode.
 - Parses Codex rate-limit headers already stored by Codex.
-- If local logs do not contain quota data, reads `~/.codex/auth.json` in memory.
-- If local logs do not contain quota data, sends an authenticated GET request to `https://chatgpt.com/backend-api/wham/usage`.
+- If local quota data is missing, at least 60 seconds old, has an invalid timestamp, or has a passed reset time, reads `~/.codex/auth.json` in memory.
+- In that case, sends an authenticated GET request to `https://chatgpt.com/backend-api/wham/usage` at the configured quota refresh interval (10 seconds by default). HTTP caching and automatic redirects are disabled.
 - Does not create telemetry, analytics, history, or startup entries.
 
 ## Offline-only mode
@@ -82,7 +82,7 @@ the app reads `~/.codex/auth.json` in memory and sends an authenticated GET requ
 https://chatgpt.com/backend-api/wham/usage
 ```
 
-The access token and account id are used only for that request. They are not logged, displayed, copied into this project, or written to disk. If the live request fails, the app falls back to local logs.
+The access token and account id are used only for that request. They are not logged, displayed, copied into this project, or written to disk. If the live request fails, the app falls back only to fresh local logs. Expired records are not displayed as current quota.
 
 ## Data retained
 

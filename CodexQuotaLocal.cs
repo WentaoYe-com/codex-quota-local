@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Codex Quota Local")]
 [assembly: System.Reflection.AssemblyDescription("Small local-first Codex quota overlay.")]
-[assembly: System.Reflection.AssemblyVersion("0.3.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.3.2.0")]
 
 internal enum QuotaReadMode
 {
@@ -34,6 +34,22 @@ internal sealed class QuotaSnapshot
 {
     public readonly List<QuotaWindow> Windows = new List<QuotaWindow>();
     public string Source;
+    public long ObservedAtUnix;
+}
+
+internal static class QuotaFreshness
+{
+    public const int MaxAgeSeconds = 60;
+
+    public static bool IsCurrent(QuotaSnapshot snapshot, long now)
+    {
+        if (snapshot == null || snapshot.Windows.Count == 0 || snapshot.ObservedAtUnix <= 0 ||
+            snapshot.ObservedAtUnix > now + 5 || now - snapshot.ObservedAtUnix >= MaxAgeSeconds)
+            return false;
+        foreach (QuotaWindow window in snapshot.Windows)
+            if (window.ResetAtUnix > 0 && window.ResetAtUnix <= now) return false;
+        return true;
+    }
 }
 
 internal sealed class RadarSnapshot
@@ -93,24 +109,29 @@ internal static class QuotaReader
 
     public static QuotaSnapshot Read(QuotaReadMode mode)
     {
+        return Read(mode, ReadLogs, ReadRemote);
+    }
+
+    internal static QuotaSnapshot Read(QuotaReadMode mode, Func<QuotaSnapshot> readLogs, Func<QuotaSnapshot> readRemote)
+    {
         if (mode == QuotaReadMode.OfflineOnly)
-            return ReadLogs();
+            return readLogs();
 
         if (mode == QuotaReadMode.LiveFirst)
         {
-            QuotaSnapshot remote = ReadRemote();
+            QuotaSnapshot remote = readRemote();
             if (remote != null) return remote;
             string remoteError = LastDiagnostic;
-            QuotaSnapshot fallback = ReadLogs();
+            QuotaSnapshot fallback = readLogs();
             LastDiagnostic = fallback == null ? remoteError + "; offline fallback failed" : remoteError + "; using offline fallback";
             return fallback;
         }
 
-        QuotaSnapshot local = ReadLogs();
+        QuotaSnapshot local = readLogs();
         if (local != null) return local;
 
         string offlineError = LastDiagnostic;
-        QuotaSnapshot liveFallback = ReadRemote();
+        QuotaSnapshot liveFallback = readRemote();
         LastDiagnostic = liveFallback == null
             ? offlineError + "; live fallback failed: " + LastDiagnostic
             : offlineError + "; using live fallback";
@@ -136,7 +157,7 @@ internal static class QuotaReader
         }
 
         const string sql =
-            "SELECT feedback_log_body FROM logs " +
+            "SELECT feedback_log_body, ts FROM logs " +
             "WHERE feedback_log_body LIKE '%x-codex-%-used-percent%' " +
             "ORDER BY ts DESC, ts_nanos DESC, id DESC LIMIT 1";
 
@@ -168,16 +189,29 @@ internal static class QuotaReader
             }
 
             string body = ReadUtf8Column(statement, 0);
-            QuotaSnapshot snapshot = ParseHeaderSnapshot(body);
+            long observedAt;
+            Int64.TryParse(ReadUtf8Column(statement, 1), out observedAt);
+            QuotaSnapshot snapshot = ParseHeaderSnapshot(body, observedAt);
             if (snapshot.Windows.Count == 0)
             {
                 LastDiagnostic = "local log entry had no standard quota windows";
                 return null;
             }
 
+            if (!QuotaFreshness.IsCurrent(snapshot, UnixTime.Now()))
+            {
+                LastDiagnostic = "local quota stale: record older than 60s, invalid timestamp, or reset time passed";
+                return null;
+            }
+
             snapshot.Source = "offline";
             LastDiagnostic = "offline ok";
             return snapshot;
+        }
+        catch (Exception exception)
+        {
+            LastDiagnostic = "local quota read failed: " + exception.GetType().Name;
+            return null;
         }
         finally
         {
@@ -225,6 +259,8 @@ internal static class QuotaReader
             request.UserAgent = "codex-quota-local/0.3";
             request.Timeout = 8000;
             request.ReadWriteTimeout = 8000;
+            request.AllowAutoRedirect = false;
+            request.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore);
             request.Headers[HttpRequestHeader.Authorization] = "Bearer " + accessToken;
             request.Headers["ChatGPT-Account-Id"] = accountId;
 
@@ -243,12 +279,19 @@ internal static class QuotaReader
             Dictionary<string, object> root = serializer.DeserializeObject(json) as Dictionary<string, object>;
             Dictionary<string, object> rateLimit = Dict(root, "rate_limit");
             QuotaSnapshot snapshot = new QuotaSnapshot();
+            snapshot.ObservedAtUnix = UnixTime.Now();
             AddRemoteWindow(snapshot, rateLimit, "primary_window", "primary");
             AddRemoteWindow(snapshot, rateLimit, "secondary_window", "secondary");
             Sort(snapshot);
             if (snapshot.Windows.Count == 0)
             {
                 LastDiagnostic = "live response had no standard quota windows";
+                return null;
+            }
+
+            if (!QuotaFreshness.IsCurrent(snapshot, UnixTime.Now()))
+            {
+                LastDiagnostic = "live quota unavailable: reset time passed; awaiting updated window";
                 return null;
             }
 
@@ -269,9 +312,10 @@ internal static class QuotaReader
         }
     }
 
-    private static QuotaSnapshot ParseHeaderSnapshot(string body)
+    internal static QuotaSnapshot ParseHeaderSnapshot(string body, long observedAt)
     {
         QuotaSnapshot snapshot = new QuotaSnapshot();
+        snapshot.ObservedAtUnix = observedAt;
         HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         MatchCollection matches = Regex.Matches(body ?? String.Empty,
             "\\\"x-codex-(?<name>[a-z0-9-]+)-window-minutes\\\"\\s*:\\s*\\\"(?<minutes>[^\\\"]*)\\\"",
@@ -299,7 +343,7 @@ internal static class QuotaReader
             {
                 long resetAfter;
                 resetAt = Int64.TryParse(HeaderValue(body, "x-codex-" + name + "-reset-after-seconds"), out resetAfter) && resetAfter > 0
-                    ? UnixTime.Now() + resetAfter
+                    ? observedAt + resetAfter
                     : 0;
             }
 
@@ -877,7 +921,15 @@ internal sealed class QuotaOverlayForm : Form
 
     private void OnTick(object sender, EventArgs e)
     {
-        if (ShouldExitWithCodex()) Close();
+        if (ShouldExitWithCodex()) { Close(); return; }
+        if (latest != null && !QuotaFreshness.IsCurrent(latest, UnixTime.Now()))
+        {
+            latest = null;
+            label.Text = FormatSnapshot(null, latestRadar);
+            trayIcon.Text = ShortTrayText(label.Text);
+            UpdateMenuState(null, latestRadar);
+            quotaCountdown = 0;
+        }
         TrackCodexWindow();
         if (quotaCountdown > 0) quotaCountdown--;
         if (radarMode && radarCountdown > 0) radarCountdown--;
@@ -890,10 +942,10 @@ internal sealed class QuotaOverlayForm : Form
         if (Interlocked.Exchange(ref refreshInProgress, 1) != 0) return;
         bool readQuota = force || quotaCountdown <= 0;
         bool readRadar = radarMode && (force || radarCountdown <= 0);
+        QuotaReadMode readMode = quotaMode;
+        bool readRadarEnabled = radarMode;
         ThreadPool.QueueUserWorkItem(delegate
         {
-            QuotaReadMode readMode = quotaMode;
-            bool readRadarEnabled = radarMode;
             QuotaSnapshot snapshot = readQuota ? QuotaReader.Read(readMode) : latest;
             RadarSnapshot radar = readRadar ? RadarReader.Read() : latestRadar;
             try
@@ -902,13 +954,21 @@ internal sealed class QuotaOverlayForm : Form
                 {
                     BeginInvoke((MethodInvoker)delegate
                     {
+                        if (IsDisposed) { Interlocked.Exchange(ref refreshInProgress, 0); return; }
+                        if (readMode != quotaMode)
+                        {
+                            Interlocked.Exchange(ref refreshInProgress, 0);
+                            quotaCountdown = 0;
+                            RefreshData(false);
+                            return;
+                        }
                         if (!radarMode) radar = null;
                         latest = snapshot;
                         latestRadar = radar;
                         label.Text = FormatSnapshot(snapshot, radar);
                         trayIcon.Text = ShortTrayText(label.Text);
                         UpdateMenuState(snapshot, radar);
-                        if (readQuota) quotaCountdown = snapshot == null ? 3 : quotaIntervalSeconds;
+                        if (readQuota) quotaCountdown = quotaIntervalSeconds;
                         if (readRadar && readRadarEnabled) radarCountdown = radar == null ? 60 : radarIntervalSeconds;
                         Interlocked.Exchange(ref refreshInProgress, 0);
                     });
@@ -1020,6 +1080,8 @@ internal sealed class QuotaOverlayForm : Form
     {
         if (snapshot != null && snapshot.Source != null)
             return "Quota source: " + snapshot.Source;
+        if (QuotaReader.LastDiagnostic != "not started")
+            return "Quota unavailable: " + QuotaReader.LastDiagnostic;
         if (mode == QuotaReadMode.Auto)
             return "Quota mode: auto (logs, then live fallback)";
         return "Quota mode: " + QuotaModeText(mode);
@@ -1034,7 +1096,7 @@ internal sealed class QuotaOverlayForm : Form
     private static string FormatSnapshot(QuotaSnapshot snapshot, RadarSnapshot radar)
     {
         List<string> output = new List<string>();
-        if (snapshot == null) output.Add("No quota data");
+        if (!QuotaFreshness.IsCurrent(snapshot, UnixTime.Now())) output.Add("Quota: -- (stale/unavailable)");
         else output.Add(FormatQuota(snapshot));
 
         if (radar != null)
@@ -1234,6 +1296,7 @@ internal static class Program
                     window.ResetAtUnix > 0 ? UnixTime.ToLocal(window.ResetAtUnix).ToString("yyyy-MM-dd HH:mm:ss") : "unknown");
             }
             Console.WriteLine("source: " + data.Source);
+            Console.WriteLine("observed_at: " + UnixTime.ToLocal(data.ObservedAtUnix).ToString("yyyy-MM-dd HH:mm:ss"));
             Console.WriteLine("diagnostic: " + QuotaReader.LastDiagnostic);
             if (radar)
             {

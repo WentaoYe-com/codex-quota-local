@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$version = '0.3.1'
+$version = '0.3.2'
 $compiler = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw 'The built-in Windows C# compiler was not found.'
@@ -42,6 +42,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (Test-Path -LiteralPath $stageDir) {
+    $resolvedStage = [IO.Path]::GetFullPath($stageDir)
+    $resolvedDist = [IO.Path]::GetFullPath($distDir).TrimEnd('\') + '\'
+    if (-not $resolvedStage.StartsWith($resolvedDist, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Package staging directory must be inside dist.'
+    }
     Remove-Item -LiteralPath $stageDir -Recurse -Force
 }
 New-Item -ItemType Directory -Path $stageDir | Out-Null
@@ -52,7 +57,7 @@ Copy-Item -LiteralPath (Join-Path $projectDir 'README.md') -Destination $stageDi
 Copy-Item -LiteralPath (Join-Path $projectDir 'PRIVACY.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'SECURITY.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'CHANGELOG.md') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'RELEASE_NOTES_v0.3.1.md') -Destination $stageDir
+Copy-Item -LiteralPath (Join-Path $projectDir "RELEASE_NOTES_v$version.md") -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'LICENSE') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Offline.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-With-Radar.cmd') -Destination $stageDir

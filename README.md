@@ -12,7 +12,7 @@
 - 悬浮窗跟随 ChatGPT/Codex 桌面窗口。
 - 系统托盘菜单提供手动刷新和退出。
 - 附带 CLI 快照模式，方便排查和自动化。
-- 默认先从本地日志读取额度；如果日志没有 quota headers，再读取 Codex 登录态并请求 OpenAI usage endpoint。
+- 默认先从本地日志读取额度；如果日志缺失、超过 60 秒或重置时间已过，再读取 Codex 登录态并请求 OpenAI usage endpoint。
 - 支持严格离线模式 `--offline-only`，只读本地日志，不读取 `auth.json`，不联网。
 - 托盘右键可直接切换 quota mode、开关 reset radar、修改 quota/radar 刷新频率。
 - 默认额度每 10 秒刷新一次，radar 每 10 分钟刷新一次。
@@ -74,7 +74,7 @@ Run-Follow-Codex.cmd
 
 Codex Quota Local 的取舍：
 
-- 默认 auto：先只读 `~/.codex/logs_2.sqlite`；如果本地日志没有可解析 quota，再读取 `auth.json` 并请求 OpenAI usage endpoint。
+- 默认 auto：先只读 `~/.codex/logs_2.sqlite`；如果本地日志没有可用的新鲜额度记录，再读取 `auth.json` 并请求 OpenAI usage endpoint。
 - 严格离线：`--offline-only` 只读本地日志，不读 `auth.json`，不联网。
 - Radar 独立开关：只有 `--radar` 才访问公开 radar endpoints，且不发送任何 Codex token。
 - Live-first 独立开关：`--live` 会优先读取 usage endpoint，再回退到本地日志。
@@ -94,7 +94,7 @@ Codex Quota Local 的取舍：
 
 - 读取 `~/.codex/logs_2.sqlite`，SQLite read-only 打开。
 - 解析 Codex 已经写入本地日志的 rate-limit header。
-- 如果本地日志没有 quota data，再读取 `~/.codex/auth.json` 中的 Codex access token 和 account id。
+- 如果本地日志没有 quota data、记录超过 60 秒或重置时间已过，再读取 `~/.codex/auth.json` 中的 Codex access token 和 account id。
 - 兜底请求 `https://chatgpt.com/backend-api/wham/usage`。
 - token 只在内存中使用，不写入磁盘，不写入日志。
 - 不创建开机启动项。
@@ -129,12 +129,12 @@ Live-first 运行：
 
 - 先读取 `~/.codex/auth.json` 中的 Codex access token 和 account id。
 - 优先请求 `https://chatgpt.com/backend-api/wham/usage`。
-- 如果 live 请求失败，再回退到本地日志。
+- 如果 live 请求失败，只回退到仍然有效的本地日志；不会继续展示过期百分比。
 - token 只在内存中使用，不写入磁盘，不写入日志。
 
 ## 下载后直接使用
 
-从 GitHub Release 下载 `CodexQuotaLocal-v0.3.1-win-x64-portable.zip`，解压后运行：
+从 GitHub Release 下载最新的 portable zip，解压后运行：
 
 ```powershell
 .\CodexQuotaLocal.exe
@@ -173,6 +173,7 @@ Run-Follow-Codex.cmd
 说明：
 
 - `--quota-interval-seconds` 控制本地额度刷新间隔，默认 `10` 秒，最小 `2` 秒。
+- 默认 auto 模式下，日志失效时也会按额度刷新间隔查询官方接口；每次重新读取旧日志不会延长记录的有效期。
 - `--radar-interval-minutes` 控制 radar 刷新间隔，默认 `10` 分钟，最小 `1` 分钟。
 - 托盘菜单里的 `Refresh now` 会立即刷新额度和 radar。
 
@@ -198,7 +199,9 @@ Run-Follow-Codex.cmd
 - `Run-Offline.cmd` / `Snapshot-Offline.cmd`：严格离线双击脚本。
 - `Run-With-Radar.cmd` / `Snapshot-With-Radar.cmd`：auto quota + radar 双击脚本。
 - `Run-Follow-Codex.cmd`：auto quota + radar + 跟随 Codex/ChatGPT 打开关闭的 watcher 脚本。
-- `dist/CodexQuotaLocal-v0.3.1-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
+- `dist/CodexQuotaLocal-v0.3.2-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
+
+运行 `./test.ps1` 可执行额度读取回归测试。测试使用临时合成日志，不读取真实登录信息，也不联网。
 
 ## 环境变量
 
@@ -222,8 +225,9 @@ $env:CODEX_QUOTA_DATA_DIR="D:\path\to\fixture-codex-home"
 
 ## 已知限制
 
-- 默认 auto 模式优先依赖 Codex 本地日志；日志缺失或格式变化时会回退到 live usage endpoint。
-- `--offline-only` 模式依赖 Codex 本地日志，因此可能比实时 usage endpoint 稍有滞后，也可能在日志没有 quota headers 时显示 `NO_DATA`。
+- 默认 auto 模式优先依赖 Codex 本地日志；日志缺失、格式变化、超过 60 秒或任一窗口重置时间已过时会回退到 live usage endpoint。60 秒内的本地读数仍可能滞后；需要优先查询官方接口时可使用 `--live`。
+- `--offline-only` 模式无法主动获取新额度。日志失效时显示 `Quota: -- (stale/unavailable)`，CLI 返回 `NO_DATA`；托盘会显示诊断原因。不会假定额度已经恢复到 100%。
+- 日志中的相对重置时间按日志产生时间计算，CLI 的 `observed_at` 可用于核对数据时间。
 - Codex 本地日志格式和 usage endpoint 都不是稳定公开 API，未来 Codex 更新可能导致解析失效。
 - Reset radar 是第三方公开预测，不是 OpenAI 官方承诺。
 - 默认 radar 轮询频率是 10 分钟；如果请求失败，overlay 会 60 秒后重试。
