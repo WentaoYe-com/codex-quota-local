@@ -57,6 +57,23 @@ internal static class QuotaReaderTests
         Check(QuotaReader.ParseHeaderSnapshot(Headers(300, true), now - 120).Windows[0].ResetAtUnix == relative.Windows[0].ResetAtUnix,
             "re-reading does not move reset time");
 
+        string remoteJson = "{\"rate_limit\":{" +
+            "\"primary_window\":{\"used_percent\":20,\"limit_window_seconds\":18000,\"reset_at\":" + (now + 3600) + "}," +
+            "\"secondary_window\":{\"used_percent\":35,\"limit_window_seconds\":604800,\"reset_at\":" + (now + 86400) + "}}," +
+            "\"credits\":{\"has_credits\":true,\"unlimited\":false,\"balance\":\"769.6500975000\"}}";
+        QuotaSnapshot remoteSnapshot = QuotaReader.ParseRemoteSnapshot(remoteJson, now);
+        Check(remoteSnapshot.Windows.Count == 2, "live response quota windows parsed");
+        Check(remoteSnapshot.CreditBalanceAvailable && remoteSnapshot.CreditBalance == 769.6500975000m,
+            "credit balance parsed without losing precision");
+        Check(QuotaOverlayForm.FormatCreditBalance(remoteSnapshot) == "Credits 769.65", "credit balance formatted compactly");
+        QuotaSnapshot noCredits = QuotaReader.ParseRemoteSnapshot(remoteJson.Replace("\"has_credits\":true,\"unlimited\":false,\"balance\":\"769.6500975000\"",
+            "\"has_credits\":false,\"unlimited\":false,\"balance\":null"), now);
+        Check(noCredits.CreditBalanceAvailable && noCredits.CreditBalance == 0, "account without credits displays zero");
+        QuotaSnapshot unlimited = QuotaReader.ParseRemoteSnapshot(remoteJson.Replace("\"unlimited\":false", "\"unlimited\":true"), now);
+        Check(QuotaOverlayForm.FormatCreditBalance(unlimited) == "Credits unlimited", "unlimited credits displayed");
+        QuotaSnapshot missingCredits = QuotaReader.ParseRemoteSnapshot(remoteJson.Substring(0, remoteJson.IndexOf(",\"credits\"")) + "}", now);
+        Check(QuotaOverlayForm.FormatCreditBalance(missingCredits) == "Credits --", "missing credit field is unavailable");
+
         string directory = Path.Combine(Path.GetTempPath(), "codex-quota-test-" + Guid.NewGuid().ToString("N"));
         string previous = Environment.GetEnvironmentVariable("CODEX_QUOTA_DATA_DIR");
         Directory.CreateDirectory(directory);
@@ -83,6 +100,11 @@ internal static class QuotaReaderTests
             Check(QuotaReader.Read(QuotaReadMode.LiveFirst, logs, unavailable) == null, "live-first fallback rejects stale logs");
             WriteLog(path, now, Headers(now + 3600, false));
             Check(QuotaReader.Read(QuotaReadMode.Auto, logs, remote) != null && remoteCalls == 0, "fresh local data avoids network");
+            Check(QuotaReader.Read(QuotaReadMode.Auto, true, logs, remote) == fresh && remoteCalls == 1,
+                "credit display queries live even when local quota is fresh");
+            remoteCalls = 0;
+            Check(QuotaReader.Read(QuotaReadMode.OfflineOnly, true, logs, remote) != null && remoteCalls == 0,
+                "offline mode ignores credit request and stays offline");
             Check(QuotaReader.Read(QuotaReadMode.LiveFirst, logs, unavailable) != null, "live failure can use fresh local data");
             WriteLog(path, now, "invalid");
             Check(QuotaReader.Read(QuotaReadMode.OfflineOnly) == null, "missing headers reported as unavailable");

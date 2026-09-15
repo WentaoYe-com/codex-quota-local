@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Codex Quota Local")]
 [assembly: System.Reflection.AssemblyDescription("Small local-first Codex quota overlay.")]
-[assembly: System.Reflection.AssemblyVersion("0.3.2.0")]
+[assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
 
 internal enum QuotaReadMode
 {
@@ -35,6 +35,9 @@ internal sealed class QuotaSnapshot
     public readonly List<QuotaWindow> Windows = new List<QuotaWindow>();
     public string Source;
     public long ObservedAtUnix;
+    public bool CreditBalanceAvailable;
+    public decimal CreditBalance;
+    public bool CreditsUnlimited;
 }
 
 internal static class QuotaFreshness
@@ -109,21 +112,34 @@ internal static class QuotaReader
 
     public static QuotaSnapshot Read(QuotaReadMode mode)
     {
-        return Read(mode, ReadLogs, ReadRemote);
+        return Read(mode, false);
+    }
+
+    public static QuotaSnapshot Read(QuotaReadMode mode, bool includeCredits)
+    {
+        return Read(mode, includeCredits, ReadLogs, ReadRemote);
     }
 
     internal static QuotaSnapshot Read(QuotaReadMode mode, Func<QuotaSnapshot> readLogs, Func<QuotaSnapshot> readRemote)
     {
+        return Read(mode, false, readLogs, readRemote);
+    }
+
+    internal static QuotaSnapshot Read(QuotaReadMode mode, bool includeCredits,
+        Func<QuotaSnapshot> readLogs, Func<QuotaSnapshot> readRemote)
+    {
         if (mode == QuotaReadMode.OfflineOnly)
             return readLogs();
 
-        if (mode == QuotaReadMode.LiveFirst)
+        if (mode == QuotaReadMode.LiveFirst || includeCredits)
         {
             QuotaSnapshot remote = readRemote();
             if (remote != null) return remote;
             string remoteError = LastDiagnostic;
             QuotaSnapshot fallback = readLogs();
-            LastDiagnostic = fallback == null ? remoteError + "; offline fallback failed" : remoteError + "; using offline fallback";
+            LastDiagnostic = fallback == null
+                ? remoteError + "; offline fallback failed"
+                : remoteError + (includeCredits ? "; using offline fallback without credits" : "; using offline fallback");
             return fallback;
         }
 
@@ -276,13 +292,7 @@ internal static class QuotaReader
                 json = reader.ReadToEnd();
             }
 
-            Dictionary<string, object> root = serializer.DeserializeObject(json) as Dictionary<string, object>;
-            Dictionary<string, object> rateLimit = Dict(root, "rate_limit");
-            QuotaSnapshot snapshot = new QuotaSnapshot();
-            snapshot.ObservedAtUnix = UnixTime.Now();
-            AddRemoteWindow(snapshot, rateLimit, "primary_window", "primary");
-            AddRemoteWindow(snapshot, rateLimit, "secondary_window", "secondary");
-            Sort(snapshot);
+            QuotaSnapshot snapshot = ParseRemoteSnapshot(json, UnixTime.Now());
             if (snapshot.Windows.Count == 0)
             {
                 LastDiagnostic = "live response had no standard quota windows";
@@ -360,6 +370,41 @@ internal static class QuotaReader
         return snapshot;
     }
 
+    internal static QuotaSnapshot ParseRemoteSnapshot(string json, long observedAt)
+    {
+        JavaScriptSerializer serializer = new JavaScriptSerializer();
+        Dictionary<string, object> root = serializer.DeserializeObject(json) as Dictionary<string, object>;
+        Dictionary<string, object> rateLimit = Dict(root, "rate_limit");
+        QuotaSnapshot snapshot = new QuotaSnapshot();
+        snapshot.ObservedAtUnix = observedAt;
+        AddRemoteWindow(snapshot, rateLimit, "primary_window", "primary");
+        AddRemoteWindow(snapshot, rateLimit, "secondary_window", "secondary");
+
+        Dictionary<string, object> credits = Dict(root, "credits") ?? Dict(rateLimit, "credits");
+        if (credits != null)
+        {
+            bool unlimited;
+            if (TryBool(Raw(credits, "unlimited"), out unlimited))
+                snapshot.CreditsUnlimited = unlimited;
+
+            decimal balance;
+            if (TryDecimal(Raw(credits, "balance"), out balance))
+            {
+                snapshot.CreditBalance = Math.Max(0, balance);
+                snapshot.CreditBalanceAvailable = true;
+            }
+            else
+            {
+                bool hasCredits;
+                if (TryBool(Raw(credits, "has_credits"), out hasCredits) && !hasCredits)
+                    snapshot.CreditBalanceAvailable = true;
+            }
+        }
+
+        Sort(snapshot);
+        return snapshot;
+    }
+
     private static void AddRemoteWindow(QuotaSnapshot snapshot, Dictionary<string, object> rateLimit, string key, string name)
     {
         Dictionary<string, object> window = Dict(rateLimit, key);
@@ -426,6 +471,28 @@ internal static class QuotaReader
             return true;
         }
         catch { result = 0; return false; }
+    }
+
+    private static bool TryDecimal(object value, out decimal result)
+    {
+        try
+        {
+            if (value == null) { result = 0; return false; }
+            result = Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch { result = 0; return false; }
+    }
+
+    private static bool TryBool(object value, out bool result)
+    {
+        try
+        {
+            if (value == null) { result = false; return false; }
+            result = Convert.ToBoolean(value, System.Globalization.CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch { result = false; return false; }
     }
 
     private static string HeaderValue(string body, string name)
@@ -778,6 +845,7 @@ internal sealed class QuotaOverlayForm : Form
 
     private QuotaReadMode quotaMode;
     private bool radarMode;
+    private bool balanceMode;
     private bool exitWithCodex;
     private bool hostSeen;
     private int hostMissingSeconds;
@@ -789,6 +857,7 @@ internal sealed class QuotaOverlayForm : Form
     private readonly ToolStripMenuItem refreshItem;
     private readonly ToolStripMenuItem liveItem;
     private readonly ToolStripMenuItem radarItem;
+    private readonly ToolStripMenuItem balanceItem;
     private readonly ToolStripMenuItem quotaModeMenu;
     private readonly ToolStripMenuItem quotaAutoItem;
     private readonly ToolStripMenuItem quotaOfflineOnlyItem;
@@ -816,10 +885,11 @@ internal sealed class QuotaOverlayForm : Form
     [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)] private static extern IntPtr SetWindowLongPtr32(IntPtr hwnd, int index, IntPtr value);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect rect, int size);
 
-    public QuotaOverlayForm(QuotaReadMode mode, bool radar, int quotaInterval, int radarInterval, bool exitWithHost)
+    public QuotaOverlayForm(QuotaReadMode mode, bool radar, bool balance, int quotaInterval, int radarInterval, bool exitWithHost)
     {
         quotaMode = mode;
         radarMode = radar;
+        balanceMode = balance && mode != QuotaReadMode.OfflineOnly;
         exitWithCodex = exitWithHost;
         quotaIntervalSeconds = Math.Max(2, quotaInterval);
         radarIntervalSeconds = Math.Max(30, radarInterval);
@@ -857,6 +927,8 @@ internal sealed class QuotaOverlayForm : Form
         quotaModeMenu.DropDownItems.Add(quotaLiveFirstItem);
         radarItem = new ToolStripMenuItem("Reset radar: off");
         radarItem.Click += delegate { SetRadarMode(!radarMode); };
+        balanceItem = new ToolStripMenuItem("Credit balance: off");
+        balanceItem.Click += delegate { SetBalanceMode(!balanceMode); };
         quotaRefreshMenu = new ToolStripMenuItem("Quota refresh");
         AddIntervalItem(quotaRefreshMenu, "5 seconds", 5, true);
         AddIntervalItem(quotaRefreshMenu, "10 seconds", 10, true);
@@ -873,6 +945,7 @@ internal sealed class QuotaOverlayForm : Form
         menu.Items.Add(liveItem);
         menu.Items.Add(quotaModeMenu);
         menu.Items.Add(radarItem);
+        menu.Items.Add(balanceItem);
         menu.Items.Add(quotaRefreshMenu);
         menu.Items.Add(radarRefreshMenu);
         menu.Items.Add(new ToolStripSeparator());
@@ -925,7 +998,7 @@ internal sealed class QuotaOverlayForm : Form
         if (latest != null && !QuotaFreshness.IsCurrent(latest, UnixTime.Now()))
         {
             latest = null;
-            label.Text = FormatSnapshot(null, latestRadar);
+            label.Text = FormatSnapshot(null, latestRadar, balanceMode);
             trayIcon.Text = ShortTrayText(label.Text);
             UpdateMenuState(null, latestRadar);
             quotaCountdown = 0;
@@ -944,9 +1017,10 @@ internal sealed class QuotaOverlayForm : Form
         bool readRadar = radarMode && (force || radarCountdown <= 0);
         QuotaReadMode readMode = quotaMode;
         bool readRadarEnabled = radarMode;
+        bool readBalanceEnabled = balanceMode;
         ThreadPool.QueueUserWorkItem(delegate
         {
-            QuotaSnapshot snapshot = readQuota ? QuotaReader.Read(readMode) : latest;
+            QuotaSnapshot snapshot = readQuota ? QuotaReader.Read(readMode, readBalanceEnabled) : latest;
             RadarSnapshot radar = readRadar ? RadarReader.Read() : latestRadar;
             try
             {
@@ -955,7 +1029,7 @@ internal sealed class QuotaOverlayForm : Form
                     BeginInvoke((MethodInvoker)delegate
                     {
                         if (IsDisposed) { Interlocked.Exchange(ref refreshInProgress, 0); return; }
-                        if (readMode != quotaMode)
+                        if (readMode != quotaMode || readBalanceEnabled != balanceMode)
                         {
                             Interlocked.Exchange(ref refreshInProgress, 0);
                             quotaCountdown = 0;
@@ -965,7 +1039,7 @@ internal sealed class QuotaOverlayForm : Form
                         if (!radarMode) radar = null;
                         latest = snapshot;
                         latestRadar = radar;
-                        label.Text = FormatSnapshot(snapshot, radar);
+                        label.Text = FormatSnapshot(snapshot, radar, balanceMode);
                         trayIcon.Text = ShortTrayText(label.Text);
                         UpdateMenuState(snapshot, radar);
                         if (readQuota) quotaCountdown = quotaIntervalSeconds;
@@ -986,6 +1060,7 @@ internal sealed class QuotaOverlayForm : Form
     {
         if (quotaMode == mode) return;
         quotaMode = mode;
+        if (quotaMode == QuotaReadMode.OfflineOnly) balanceMode = false;
         quotaCountdown = 0;
         latest = null;
         label.Text = InitialQuotaText(quotaMode);
@@ -1000,10 +1075,22 @@ internal sealed class QuotaOverlayForm : Form
         radarMode = enabled;
         radarCountdown = 0;
         if (!radarMode) latestRadar = null;
-        label.Text = FormatSnapshot(latest, latestRadar);
+        label.Text = FormatSnapshot(latest, latestRadar, balanceMode);
         trayIcon.Text = ShortTrayText(label.Text);
         UpdateMenuState(latest, latestRadar);
         if (radarMode) RefreshData(true);
+    }
+
+    private void SetBalanceMode(bool enabled)
+    {
+        if (quotaMode == QuotaReadMode.OfflineOnly || balanceMode == enabled) return;
+        balanceMode = enabled;
+        quotaCountdown = 0;
+        latest = null;
+        label.Text = InitialQuotaText(quotaMode);
+        trayIcon.Text = ShortTrayText(label.Text);
+        UpdateMenuState(null, latestRadar);
+        RefreshData(false);
     }
 
     private void SetQuotaInterval(int seconds)
@@ -1042,6 +1129,9 @@ internal sealed class QuotaOverlayForm : Form
         quotaLiveFirstItem.Checked = quotaMode == QuotaReadMode.LiveFirst;
         radarItem.Checked = radarMode;
         radarItem.Text = radarMode ? FormatRadarMenuText(radar) : "Reset radar: off";
+        balanceItem.Enabled = quotaMode != QuotaReadMode.OfflineOnly;
+        balanceItem.Checked = balanceMode;
+        balanceItem.Text = balanceMode ? "Credit balance: on" : "Credit balance: off";
         SetIntervalChecks(quotaRefreshMenu, quotaIntervalSeconds);
         SetIntervalChecks(radarRefreshMenu, radarIntervalSeconds);
     }
@@ -1093,11 +1183,14 @@ internal sealed class QuotaOverlayForm : Form
         return "Reset radar 24h: " + FormatRadarValues(radar) + " (oracle/signal/watch)";
     }
 
-    private static string FormatSnapshot(QuotaSnapshot snapshot, RadarSnapshot radar)
+    private static string FormatSnapshot(QuotaSnapshot snapshot, RadarSnapshot radar, bool showBalance)
     {
         List<string> output = new List<string>();
         if (!QuotaFreshness.IsCurrent(snapshot, UnixTime.Now())) output.Add("Quota: -- (stale/unavailable)");
         else output.Add(FormatQuota(snapshot));
+
+        if (showBalance)
+            output.Add(FormatCreditBalance(snapshot));
 
         if (radar != null)
         {
@@ -1105,6 +1198,14 @@ internal sealed class QuotaOverlayForm : Form
         }
 
         return String.Join("  |  ", output.ToArray());
+    }
+
+    internal static string FormatCreditBalance(QuotaSnapshot snapshot)
+    {
+        if (snapshot == null) return "Credits --";
+        if (snapshot.CreditsUnlimited) return "Credits unlimited";
+        if (!snapshot.CreditBalanceAvailable) return "Credits --";
+        return "Credits " + snapshot.CreditBalance.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string FormatRadarValues(RadarSnapshot radar)
@@ -1271,6 +1372,7 @@ internal static class Program
         bool live = HasArg(args, "--live");
         bool offlineOnly = HasArg(args, "--offline-only");
         bool radar = HasArg(args, "--radar");
+        bool balance = HasArg(args, "--balance") && !offlineOnly;
         bool snapshot = HasArg(args, "--snapshot");
         bool followCodex = HasArg(args, "--follow-codex");
         bool exitWithCodex = HasArg(args, "--exit-with-codex");
@@ -1280,7 +1382,7 @@ internal static class Program
 
         if (snapshot)
         {
-            QuotaSnapshot data = QuotaReader.Read(quotaMode);
+            QuotaSnapshot data = QuotaReader.Read(quotaMode, balance);
             if (data == null)
             {
                 Console.WriteLine("NO_DATA: " + QuotaReader.LastDiagnostic);
@@ -1298,6 +1400,14 @@ internal static class Program
             Console.WriteLine("source: " + data.Source);
             Console.WriteLine("observed_at: " + UnixTime.ToLocal(data.ObservedAtUnix).ToString("yyyy-MM-dd HH:mm:ss"));
             Console.WriteLine("diagnostic: " + QuotaReader.LastDiagnostic);
+            if (balance)
+            {
+                Console.WriteLine("credits_balance: " + (data.CreditsUnlimited
+                    ? "unlimited"
+                    : (data.CreditBalanceAvailable
+                        ? data.CreditBalance.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                        : "unavailable")));
+            }
             if (radar)
             {
                 RadarSnapshot radarData = RadarReader.Read();
@@ -1330,13 +1440,13 @@ internal static class Program
         }
 
         bool ownsMutex;
-        using (Mutex mutex = new Mutex(true, "Local\\CodexQuotaLocal" + quotaMode.ToString() + (radar ? "Radar" : ""), out ownsMutex))
+        using (Mutex mutex = new Mutex(true, "Local\\CodexQuotaLocal" + quotaMode.ToString() + (radar ? "Radar" : "") + (balance ? "Balance" : ""), out ownsMutex))
         {
             if (!ownsMutex) return;
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new QuotaOverlayForm(quotaMode, radar, quotaInterval, radarInterval, exitWithCodex));
+            Application.Run(new QuotaOverlayForm(quotaMode, radar, balance, quotaInterval, radarInterval, exitWithCodex));
         }
     }
 
@@ -1368,6 +1478,7 @@ internal static class Program
         if (HasArg(args, "--live")) output.Add("--live");
         if (HasArg(args, "--offline-only")) output.Add("--offline-only");
         if (HasArg(args, "--radar")) output.Add("--radar");
+        if (HasArg(args, "--balance")) output.Add("--balance");
         output.Add("--exit-with-codex");
         AddIntArgument(args, output, "--quota-interval-seconds");
         AddIntArgument(args, output, "--radar-interval-minutes");

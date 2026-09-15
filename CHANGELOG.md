@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Added optional Codex credits balance display with `--balance` and a tray toggle.
+- Added compact `Credits 769.65`, `Credits unlimited`, and `Credits --` states.
+- Added CLI `credits_balance` output and double-click balance launchers.
+- Balance mode reuses the allowlisted authenticated usage endpoint and never sends credentials or balance data to radar providers.
+- Kept `--offline-only` strictly offline by disabling balance mode.
+- Added credit parsing and mode behavior regression coverage; the suite now contains 26 synthetic tests.
+
 ## 0.3.2
 
 - Fixed auto mode repeatedly displaying expired local quota instead of querying live usage.

@@ -19,9 +19,11 @@ The source intentionally hardcodes and checks the network destinations used by q
 - `--radar`: `https://codex-reset.com/api/forecast`
 - `--radar`: `https://codexreset.app/api/signal`
 - `--radar`: `https://savemetibo.com/status.json`
-- default auto fallback / `--live`: `https://chatgpt.com/backend-api/wham/usage`
+- default auto fallback / `--live` / `--balance`: `https://chatgpt.com/backend-api/wham/usage`
 
 `--offline-only` uses no network endpoint.
+
+`--balance` parses the credits object from the existing usage response. It does not add a network destination or send data to radar providers. Because this is an internal product endpoint rather than a documented public API contract, missing or changed fields are treated as unavailable.
 
 `--follow-codex` adds only local process checks for `ChatGPT` and `Codex`. It does not add a network endpoint.
 

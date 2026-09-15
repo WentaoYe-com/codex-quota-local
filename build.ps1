@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$version = '0.3.2'
+$version = '0.4.0'
 $compiler = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw 'The built-in Windows C# compiler was not found.'
@@ -61,9 +61,11 @@ Copy-Item -LiteralPath (Join-Path $projectDir "RELEASE_NOTES_v$version.md") -Des
 Copy-Item -LiteralPath (Join-Path $projectDir 'LICENSE') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Offline.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-With-Radar.cmd') -Destination $stageDir
+Copy-Item -LiteralPath (Join-Path $projectDir 'Run-With-Balance.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Follow-Codex.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-Offline.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-With-Radar.cmd') -Destination $stageDir
+Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-With-Balance.cmd') -Destination $stageDir
 
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force

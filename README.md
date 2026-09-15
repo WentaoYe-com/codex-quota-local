@@ -8,6 +8,7 @@
 
 - 显示 Codex 5 小时额度窗口剩余百分比和自然重置时间。
 - 显示 Codex weekly 额度窗口剩余百分比和自然重置时间。
+- 可选显示 Codex credits 余额。
 - 可选显示多来源 reset radar：未来 24 小时出现额外 reset-like 事件的多个公开预测/信号值。
 - 悬浮窗跟随 ChatGPT/Codex 桌面窗口。
 - 系统托盘菜单提供手动刷新和退出。
@@ -21,13 +22,14 @@
 示例显示：
 
 ```text
-5h 56% -> 15:57 | W 88% -> 9/15 12:22 | Radar 24h 25%/67%/86%
+5h 56% -> 15:57 | W 88% -> 9/15 12:22 | Credits 769.65 | Radar 24h 25%/67%/86%
 ```
 
 其中：
 
 - `5h 56% -> 15:57` 表示 5 小时窗口剩余 56%，今天 15:57 自然重置。
 - `W 88% -> 9/15 12:22` 表示 weekly 窗口剩余 88%，9 月 15 日 12:22 自然重置。
+- `Credits 769.65` 表示 Codex usage 响应中的 credits balance，保留两位小数。它不是 5 小时或 weekly 额度百分比。
 - `Radar 24h 25%/67%/86%` 表示多个公开 reset radar 来源对未来 24 小时的预测/信号读数，顺序是 `oracle / signal / watch`。如果某个来源暂时不可用，对应位置会显示 `--`。这些数值口径不同，适合并列参考，不适合取平均。它不是你个人额度窗口的自然重置时间。
 
 ## 托盘菜单
@@ -36,6 +38,7 @@
 
 - `Quota mode`：切换 `Auto: logs, then live`、`Offline only`、`Live first`。
 - `Reset radar`：开关 public reset radar。
+- `Credit balance`：开关 credits 余额显示。开启后会读取 Codex 登录态并请求官方 usage endpoint；严格离线模式下不可用。
 - `Quota refresh`：切换 5 秒、10 秒、30 秒、1 分钟。
 - `Radar refresh`：切换 1 分钟、5 分钟、10 分钟、30 分钟。
 
@@ -78,6 +81,7 @@ Codex Quota Local 的取舍：
 - 严格离线：`--offline-only` 只读本地日志，不读 `auth.json`，不联网。
 - Radar 独立开关：只有 `--radar` 才访问公开 radar endpoints，且不发送任何 Codex token。
 - Live-first 独立开关：`--live` 会优先读取 usage endpoint，再回退到本地日志。
+- Credits 独立开关：`--balance` 才会持续从 usage endpoint 获取余额；数值不写入磁盘。
 - 无依赖：Windows 自带 .NET Framework 编译器即可构建，不使用 npm、pip、Electron 或第三方 SDK。
 - 无持久化：不保存凭据、不保存历史、不写启动项、不写注册表。
 - 源码短：核心逻辑集中在一个 C# 文件，便于逐行审计。
@@ -132,6 +136,19 @@ Live-first 运行：
 - 如果 live 请求失败，只回退到仍然有效的本地日志；不会继续展示过期百分比。
 - token 只在内存中使用，不写入磁盘，不写入日志。
 
+Credits 余额运行：
+
+```powershell
+.\CodexQuotaLocal.exe --balance
+```
+
+行为：
+
+- 从同一个 `https://chatgpt.com/backend-api/wham/usage` 响应读取 credits balance。
+- 悬浮窗显示 `Credits 余额`；无限额度显示 `Credits unlimited`，字段不可用显示 `Credits --`。
+- 开启余额时会优先使用 live quota 和余额；请求失败后可回退到新鲜本地额度，但余额显示不可用。
+- 不保存余额历史，不向第三方 radar 来源发送余额或 Codex 凭据。
+
 ## 下载后直接使用
 
 从 GitHub Release 下载最新的 portable zip，解压后运行：
@@ -152,6 +169,12 @@ Run-Offline.cmd
 Run-With-Radar.cmd
 ```
 
+如果希望显示 credits 余额，可以双击：
+
+```text
+Run-With-Balance.cmd
+```
+
 如果希望悬浮窗跟随 Codex/ChatGPT 桌面端打开和关闭，可以双击：
 
 ```text
@@ -170,6 +193,12 @@ Run-Follow-Codex.cmd
 .\CodexQuotaLocal.exe --radar --quota-interval-seconds 10 --radar-interval-minutes 10
 ```
 
+余额和 Radar 可以组合：
+
+```powershell
+.\CodexQuotaLocal.exe --balance --radar
+```
+
 说明：
 
 - `--quota-interval-seconds` 控制本地额度刷新间隔，默认 `10` 秒，最小 `2` 秒。
@@ -182,6 +211,7 @@ Run-Follow-Codex.cmd
 ```powershell
 .\CodexQuotaLocalCli.exe --snapshot
 .\CodexQuotaLocalCli.exe --snapshot --radar
+.\CodexQuotaLocalCli.exe --snapshot --balance
 ```
 
 ## 从源码构建
@@ -198,8 +228,9 @@ Run-Follow-Codex.cmd
 - `CodexQuotaLocalCli.exe`：命令行快照版本。
 - `Run-Offline.cmd` / `Snapshot-Offline.cmd`：严格离线双击脚本。
 - `Run-With-Radar.cmd` / `Snapshot-With-Radar.cmd`：auto quota + radar 双击脚本。
+- `Run-With-Balance.cmd` / `Snapshot-With-Balance.cmd`：live quota + credits 余额双击脚本。
 - `Run-Follow-Codex.cmd`：auto quota + radar + 跟随 Codex/ChatGPT 打开关闭的 watcher 脚本。
-- `dist/CodexQuotaLocal-v0.3.2-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
+- `dist/CodexQuotaLocal-v0.4.0-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
 
 运行 `./test.ps1` 可执行额度读取回归测试。测试使用临时合成日志，不读取真实登录信息，也不联网。
 
@@ -229,6 +260,7 @@ $env:CODEX_QUOTA_DATA_DIR="D:\path\to\fixture-codex-home"
 - `--offline-only` 模式无法主动获取新额度。日志失效时显示 `Quota: -- (stale/unavailable)`，CLI 返回 `NO_DATA`；托盘会显示诊断原因。不会假定额度已经恢复到 100%。
 - 日志中的相对重置时间按日志产生时间计算，CLI 的 `observed_at` 可用于核对数据时间。
 - Codex 本地日志格式和 usage endpoint 都不是稳定公开 API，未来 Codex 更新可能导致解析失效。
+- OpenAI 将 credits 定义为符合条件的超额使用所消耗的计量单位；当前 usage endpoint 的响应结构并非稳定公开 API 合约。本工具因此显示 `Credits` 数量，不添加货币符号。
 - Reset radar 是第三方公开预测，不是 OpenAI 官方承诺。
 - 默认 radar 轮询频率是 10 分钟；如果请求失败，overlay 会 60 秒后重试。
 - Windows 可执行文件如果未签名，下载后可能触发 SmartScreen 提示。

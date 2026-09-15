@@ -84,9 +84,15 @@ https://chatgpt.com/backend-api/wham/usage
 
 The access token and account id are used only for that request. They are not logged, displayed, copied into this project, or written to disk. If the live request fails, the app falls back only to fresh local logs. Expired records are not displayed as current quota.
 
+## Credit balance mode
+
+When launched with `--balance`, or enabled from the tray menu, the app reads the `credits` object returned by the same authenticated usage request. It displays only the balance rounded to two decimal places, `unlimited`, or an unavailable marker.
+
+Credit balance mode does not add another endpoint. It requires `auth.json` and makes the usage request at the configured quota refresh interval. The token, account id, full response, and balance history are not stored or sent to radar providers. `--offline-only` disables credit balance mode even if `--balance` is also present.
+
 ## Data retained
 
-Quota percentages, reset times, and radar probabilities are kept in process memory while the app is running. The app does not create a quota history database or credential cache.
+Quota percentages, reset times, credit balance, and radar probabilities are kept in process memory while the app is running. The app does not create a quota history database or credential cache.
 
 ## Local paths
 
