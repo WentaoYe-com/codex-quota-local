@@ -49,10 +49,10 @@
 如果希望悬浮窗跟随 Codex/ChatGPT 桌面端打开和关闭，可以运行：
 
 ```powershell
-.\CodexQuotaLocal.exe --follow-codex --radar
+.\CodexQuotaLocal.exe --follow-codex --radar --balance
 ```
 
-或者双击：
+或者双击全功能入口（跟随 + Radar + Credits）：
 
 ```text
 Run-Follow-Codex.cmd
@@ -61,6 +61,7 @@ Run-Follow-Codex.cmd
 说明：
 
 - `--follow-codex` 会启动一个轻量 watcher。ChatGPT/Codex 桌面进程存在时，它启动悬浮窗；桌面进程关闭后，它关闭悬浮窗。
+- 随包提供的 `Run-Follow-Codex.cmd` 默认附加 `--radar --balance`；如果不需要其中某项，可直接使用自定义命令行。
 - watcher 本身需要保持运行，才能感知下一次 Codex 打开。
 - watcher 会显示一个系统托盘图标，右键 `Exit follower` 可以退出 watcher，并关闭它启动的悬浮窗。
 - 这个模式不写开机启动项、不创建服务、不写注册表。如果希望开机自动跟随，可以自行把 `Run-Follow-Codex.cmd` 放进 Windows 启动文件夹。
@@ -157,28 +158,16 @@ Credits 余额运行：
 .\CodexQuotaLocal.exe
 ```
 
-也可以直接双击严格离线入口：
-
-```text
-Run-Offline.cmd
-```
-
-如果希望显示 reset radar，并保留默认 auto quota 读取，也可以双击：
-
-```text
-Run-With-Radar.cmd
-```
-
-如果希望显示 credits 余额，可以双击：
-
-```text
-Run-With-Balance.cmd
-```
-
-如果希望悬浮窗跟随 Codex/ChatGPT 桌面端打开和关闭，可以双击：
+如果希望悬浮窗跟随 Codex/ChatGPT 桌面端打开和关闭，并同时显示 Radar 和 Credits，可以双击：
 
 ```text
 Run-Follow-Codex.cmd
+```
+
+严格离线运行：
+
+```powershell
+.\CodexQuotaLocal.exe --offline-only
 ```
 
 如果希望显示 reset radar，并保留默认 auto quota 读取：
@@ -226,10 +215,7 @@ Run-Follow-Codex.cmd
 
 - `CodexQuotaLocal.exe`：GUI 悬浮窗版本。
 - `CodexQuotaLocalCli.exe`：命令行快照版本。
-- `Run-Offline.cmd` / `Snapshot-Offline.cmd`：严格离线双击脚本。
-- `Run-With-Radar.cmd` / `Snapshot-With-Radar.cmd`：auto quota + radar 双击脚本。
-- `Run-With-Balance.cmd` / `Snapshot-With-Balance.cmd`：live quota + credits 余额双击脚本。
-- `Run-Follow-Codex.cmd`：auto quota + radar + 跟随 Codex/ChatGPT 打开关闭的 watcher 脚本。
+- `Run-Follow-Codex.cmd`：auto quota + credits + radar + 跟随 Codex/ChatGPT 打开关闭的全功能入口。
 - `dist/CodexQuotaLocal-v0.4.0-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
 
 运行 `./test.ps1` 可执行额度读取回归测试。测试使用临时合成日志，不读取真实登录信息，也不联网。
@@ -264,6 +250,12 @@ $env:CODEX_QUOTA_DATA_DIR="D:\path\to\fixture-codex-home"
 - Reset radar 是第三方公开预测，不是 OpenAI 官方承诺。
 - 默认 radar 轮询频率是 10 分钟；如果请求失败，overlay 会 60 秒后重试。
 - Windows 可执行文件如果未签名，下载后可能触发 SmartScreen 提示。
+
+## 仓库维护
+
+- `CHANGELOG.md` 是唯一的版本历史文件，不为每个版本保留重复的 release notes。
+- GitHub Release 说明由 tag 的提交记录自动生成。
+- 发布包只保留两个可执行文件、一个全功能双击入口和必要文档；其他模式通过托盘菜单或命令行参数启用。
 
 ## 许可证
 

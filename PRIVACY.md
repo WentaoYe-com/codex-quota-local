@@ -58,15 +58,15 @@ Radar mode refreshes every 10 minutes by default. The interval can be changed wi
 
 ## Follow-Codex mode
 
-When launched with:
+When launched with the full-feature convenience script (equivalent to `--follow-codex --radar --balance`):
 
 ```powershell
-.\CodexQuotaLocal.exe --follow-codex --radar
+.\Run-Follow-Codex.cmd
 ```
 
 the app keeps a lightweight local watcher process running. It checks for local `ChatGPT` or `Codex` desktop processes every 2 seconds, starts the overlay while the host exists, and closes the overlay when the host exits. The watcher exposes a tray icon with an `Exit follower` command.
 
-Follow-Codex mode does not create startup entries, services, registry keys, telemetry, analytics, history, or credential caches.
+Follow-Codex mode does not create startup entries, services, registry keys, telemetry, analytics, history, or credential caches. The bundled script enables balance and radar; their network behavior is described in the adjacent sections.
 
 ## Live-first mode
 

@@ -57,15 +57,8 @@ Copy-Item -LiteralPath (Join-Path $projectDir 'README.md') -Destination $stageDi
 Copy-Item -LiteralPath (Join-Path $projectDir 'PRIVACY.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'SECURITY.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'CHANGELOG.md') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir "RELEASE_NOTES_v$version.md") -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'LICENSE') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Offline.cmd') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'Run-With-Radar.cmd') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'Run-With-Balance.cmd') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $projectDir 'Run-Follow-Codex.cmd') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-Offline.cmd') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-With-Radar.cmd') -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $projectDir 'Snapshot-With-Balance.cmd') -Destination $stageDir
 
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force

@@ -8,6 +8,7 @@
 - Balance mode reuses the allowlisted authenticated usage endpoint and never sends credentials or balance data to radar providers.
 - Kept `--offline-only` strictly offline by disabling balance mode.
 - Added credit parsing and mode behavior regression coverage; the suite now contains 26 synthetic tests.
+- Consolidated release metadata into `CHANGELOG.md`, switched GitHub Releases to generated notes, and reduced bundled launchers to one full-feature script.
 
 ## 0.3.2
 
