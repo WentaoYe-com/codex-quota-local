@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Fixed duplicate tray icons in follow mode by keeping the watcher and overlay in one process.
+- The single visible tray icon switches between overlay controls while Codex runs and a waiting/exit menu while Codex is closed.
+- `Exit follower` now stops the follower from either tray state without restarting the overlay.
+
 ## 0.4.0
 
 - Added optional Codex credits balance display with `--balance` and a tray toggle.

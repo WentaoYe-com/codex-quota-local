@@ -17,7 +17,7 @@
 - 支持严格离线模式 `--offline-only`，只读本地日志，不读取 `auth.json`，不联网。
 - 托盘右键可直接切换 quota mode、开关 reset radar、修改 quota/radar 刷新频率。
 - 默认额度每 10 秒刷新一次，radar 每 10 分钟刷新一次。
-- 可选 `--follow-codex` watcher：Codex/ChatGPT 桌面端打开时启动悬浮窗，关闭时退出悬浮窗。
+- 可选 `--follow-codex`：Codex/ChatGPT 桌面端打开时显示悬浮窗，关闭时隐藏悬浮窗；托盘始终只显示一个图标。
 
 示例显示：
 
@@ -60,10 +60,10 @@ Run-Follow-Codex.cmd
 
 说明：
 
-- `--follow-codex` 会启动一个轻量 watcher。ChatGPT/Codex 桌面进程存在时，它启动悬浮窗；桌面进程关闭后，它关闭悬浮窗。
+- `--follow-codex` 会运行一个轻量 watcher。ChatGPT/Codex 桌面进程存在时，它在同一进程中创建悬浮窗；桌面进程关闭后，它关闭悬浮窗。
 - 随包提供的 `Run-Follow-Codex.cmd` 默认附加 `--radar --balance`；如果不需要其中某项，可直接使用自定义命令行。
 - watcher 本身需要保持运行，才能感知下一次 Codex 打开。
-- watcher 会显示一个系统托盘图标，右键 `Exit follower` 可以退出 watcher，并关闭它启动的悬浮窗。
+- Codex 运行时，唯一的托盘图标提供刷新、模式切换和 `Exit follower`；Codex 关闭后，唯一的托盘图标显示等待状态，并保留 `Exit follower`。
 - 这个模式不写开机启动项、不创建服务、不写注册表。如果希望开机自动跟随，可以自行把 `Run-Follow-Codex.cmd` 放进 Windows 启动文件夹。
 - 如果只想让当前悬浮窗在 Codex 关闭后自动退出，可以运行 `.\CodexQuotaLocal.exe --radar --exit-with-codex`。
 
@@ -216,7 +216,7 @@ Run-Follow-Codex.cmd
 - `CodexQuotaLocal.exe`：GUI 悬浮窗版本。
 - `CodexQuotaLocalCli.exe`：命令行快照版本。
 - `Run-Follow-Codex.cmd`：auto quota + credits + radar + 跟随 Codex/ChatGPT 打开关闭的全功能入口。
-- `dist/CodexQuotaLocal-v0.4.0-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
+- `dist/CodexQuotaLocal-v0.4.1-win-x64-portable.zip`：可上传到 GitHub Release 的 portable 包。
 
 运行 `./test.ps1` 可执行额度读取回归测试。测试使用临时合成日志，不读取真实登录信息，也不联网。
 

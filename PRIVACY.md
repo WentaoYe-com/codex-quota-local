@@ -64,7 +64,7 @@ When launched with the full-feature convenience script (equivalent to `--follow-
 .\Run-Follow-Codex.cmd
 ```
 
-the app keeps a lightweight local watcher process running. It checks for local `ChatGPT` or `Codex` desktop processes every 2 seconds, starts the overlay while the host exists, and closes the overlay when the host exits. The watcher exposes a tray icon with an `Exit follower` command.
+the app keeps a lightweight local watcher running. It checks for local `ChatGPT` or `Codex` desktop processes every 2 seconds, creates the overlay in the same process while the host exists, and closes the overlay when the host exits. Exactly one tray icon is visible at a time and offers an `Exit follower` command.
 
 Follow-Codex mode does not create startup entries, services, registry keys, telemetry, analytics, history, or credential caches. The bundled script enables balance and radar; their network behavior is described in the adjacent sections.
 

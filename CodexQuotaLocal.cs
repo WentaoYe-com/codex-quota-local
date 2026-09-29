@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("Codex Quota Local")]
 [assembly: System.Reflection.AssemblyDescription("Small local-first Codex quota overlay.")]
-[assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.4.1.0")]
 
 internal enum QuotaReadMode
 {
@@ -767,7 +767,7 @@ internal sealed class CodexFollowerContext : ApplicationContext
     private readonly NotifyIcon trayIcon;
     private readonly ToolStripMenuItem statusItem;
     private readonly System.Windows.Forms.Timer timer;
-    private Process child;
+    private QuotaOverlayForm overlay;
 
     public CodexFollowerContext(string[] arguments)
     {
@@ -798,7 +798,7 @@ internal sealed class CodexFollowerContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         timer.Stop();
-        StopChild();
+        if (overlay != null && !overlay.IsDisposed) overlay.Close();
         trayIcon.Visible = false;
         trayIcon.Dispose();
         base.ExitThreadCore();
@@ -807,27 +807,32 @@ internal sealed class CodexFollowerContext : ApplicationContext
     private void Tick()
     {
         bool hostRunning = CodexHost.IsRunning();
-        bool childRunning = child != null && !child.HasExited;
-        if (hostRunning && !childRunning)
-            child = Program.StartOverlayChild(args);
-        if (!hostRunning && childRunning)
+        if (hostRunning && (overlay == null || overlay.IsDisposed))
         {
-            StopChild();
-            child = null;
+            trayIcon.Visible = false;
+            try
+            {
+                overlay = Program.CreateFollowerOverlay(args, delegate { ExitThread(); });
+                IntPtr handle = overlay.Handle;
+            }
+            catch
+            {
+                if (overlay != null) overlay.Dispose();
+                overlay = null;
+                statusItem.Text = "Unable to start overlay";
+                trayIcon.Visible = true;
+                return;
+            }
+        }
+        else if (!hostRunning && overlay != null)
+        {
+            if (!overlay.IsDisposed) overlay.Close();
+            overlay = null;
         }
 
         statusItem.Text = hostRunning ? "Codex running" : "Waiting for Codex";
         trayIcon.Text = hostRunning ? "Codex Quota Follower: running" : "Codex Quota Follower: waiting";
-    }
-
-    private void StopChild()
-    {
-        if (child == null || child.HasExited) return;
-        try
-        {
-            if (!child.CloseMainWindow()) child.Kill();
-        }
-        catch { }
+        trayIcon.Visible = !hostRunning;
     }
 }
 
@@ -885,7 +890,7 @@ internal sealed class QuotaOverlayForm : Form
     [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)] private static extern IntPtr SetWindowLongPtr32(IntPtr hwnd, int index, IntPtr value);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect rect, int size);
 
-    public QuotaOverlayForm(QuotaReadMode mode, bool radar, bool balance, int quotaInterval, int radarInterval, bool exitWithHost)
+    public QuotaOverlayForm(QuotaReadMode mode, bool radar, bool balance, int quotaInterval, int radarInterval, bool exitWithHost, Action exitFollower = null)
     {
         quotaMode = mode;
         radarMode = radar;
@@ -939,8 +944,8 @@ internal sealed class QuotaOverlayForm : Form
         AddIntervalItem(radarRefreshMenu, "5 minutes", 300, false);
         AddIntervalItem(radarRefreshMenu, "10 minutes", 600, false);
         AddIntervalItem(radarRefreshMenu, "30 minutes", 1800, false);
-        ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
-        exitItem.Click += delegate { Close(); };
+        ToolStripMenuItem exitItem = new ToolStripMenuItem(exitFollower == null ? "Exit" : "Exit follower");
+        exitItem.Click += delegate { if (exitFollower == null) Close(); else exitFollower(); };
         menu.Items.Add(refreshItem);
         menu.Items.Add(liveItem);
         menu.Items.Add(quotaModeMenu);
@@ -1456,48 +1461,21 @@ internal static class Program
         using (Mutex mutex = new Mutex(true, "Local\\CodexQuotaLocalFollower" + (HasArg(args, "--radar") ? "Radar" : ""), out ownsMutex))
         {
             if (!ownsMutex) return;
+            try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new CodexFollowerContext(args));
         }
     }
 
-    public static Process StartOverlayChild(string[] args)
+    public static QuotaOverlayForm CreateFollowerOverlay(string[] args, Action exitFollower)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo();
-        startInfo.FileName = Application.ExecutablePath;
-        startInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        startInfo.Arguments = BuildOverlayArguments(args);
-        startInfo.UseShellExecute = false;
-        return Process.Start(startInfo);
-    }
-
-    private static string BuildOverlayArguments(string[] args)
-    {
-        List<string> output = new List<string>();
-        if (HasArg(args, "--live")) output.Add("--live");
-        if (HasArg(args, "--offline-only")) output.Add("--offline-only");
-        if (HasArg(args, "--radar")) output.Add("--radar");
-        if (HasArg(args, "--balance")) output.Add("--balance");
-        output.Add("--exit-with-codex");
-        AddIntArgument(args, output, "--quota-interval-seconds");
-        AddIntArgument(args, output, "--radar-interval-minutes");
-        return String.Join(" ", output.ToArray());
-    }
-
-    private static void AddIntArgument(string[] args, List<string> output, string name)
-    {
-        for (int i = 0; i < args.Length - 1; i++)
-        {
-            if (!args[i].Equals(name, StringComparison.OrdinalIgnoreCase)) continue;
-            int value;
-            if (Int32.TryParse(args[i + 1], out value) && value > 0)
-            {
-                output.Add(name);
-                output.Add(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            }
-            return;
-        }
+        bool offlineOnly = HasArg(args, "--offline-only");
+        QuotaReadMode mode = offlineOnly ? QuotaReadMode.OfflineOnly :
+            (HasArg(args, "--live") ? QuotaReadMode.LiveFirst : QuotaReadMode.Auto);
+        return new QuotaOverlayForm(mode, HasArg(args, "--radar"), HasArg(args, "--balance") && !offlineOnly,
+            IntArg(args, "--quota-interval-seconds", 10), IntArg(args, "--radar-interval-minutes", 10) * 60,
+            false, exitFollower);
     }
 
     private static bool HasArg(string[] args, string name)
